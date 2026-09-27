@@ -3,7 +3,7 @@ import {
   Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, Banknote,
   Bell, CalendarDays, CarFront, Check, CheckCircle2, ChevronDown, ChevronRight,
   CircleDollarSign, Clock3, CreditCard, Droplets, FileBarChart2, Gauge,
-  History, LayoutDashboard, Languages, LogOut, Menu, MoreHorizontal, Play, Plus, Search,
+  Download, History, LayoutDashboard, Languages, LogOut, Menu, MoreHorizontal, Play, Plus, Search,
   Settings, ShieldCheck, Sparkles, Store, UserRound, Users, Wallet, Waves, X, Zap
 } from 'lucide-react';
 import { supabaseBrowser } from '../services/supabaseBrowser.js';
@@ -260,7 +260,7 @@ function PublicLandingPage({onLogin,onRegister}){
       <section className="cw-landing-control"><div><span>CONTROL FROM ONE PLACE</span><h2>Know what’s happening<br/>across the wash floor.</h2><p>Keep today’s jobs, people and customer visits easy to follow as vehicles move through your wash.</p><div className="cw-landing-feature-list"><span><Check size={15}/> Follow wash progress</span><span><Check size={15}/> Give each role the right view</span><span><Check size={15}/> Keep a clear visit history</span><span><Check size={15}/> Work on phone or desktop</span></div></div><div className="cw-landing-control-art"><span className="cw-control-halo"/><span className="cw-control-orbit orbit-a">CHECK IN</span><span className="cw-control-orbit orbit-b">IN PROGRESS</span><span className="cw-control-orbit orbit-c"><ShieldCheck size={14}/> READY</span><div className="cw-control-core"><Waves size={38}/><small>WASH FLOOR</small><b>Work in motion</b></div></div></section>
       <section className="cw-landing-plans" id="pricing"><div><span>FLEXIBLE SUBSCRIPTION TERMS</span><h2>A plan that can grow<br/>with your wash.</h2><p>Explore monthly, quarterly and annual subscription terms. We’ll confirm available features and pricing during onboarding.</p><div className="cw-landing-quote"><p>Start with a clear view of the work. Add your team and branches as your wash grows.</p><small>Simple, guided business onboarding.</small></div></div><div className="cw-landing-plan-card"><div className="cw-plan-mark"><Sparkles size={18}/></div><small>OSHAHUB CAR WASH</small><h3>Flexible subscription</h3><p>Choose a term with the platform team and find the fit for your business.</p><ul><li><Check size={15}/> Business workspace</li><li><Check size={15}/> Role-based team portals</li><li><Check size={15}/> Mobile-ready experience</li><li><Check size={15}/> Guided approval and onboarding</li></ul><button className="cw-primary" onClick={onRegister}>Request business access <ArrowRight size={16}/></button><div className="cw-plan-reassurance"><ShieldCheck size={14}/> Account access is reviewed before activation.</div></div></section>
       <section className="cw-landing-bottom"><img src="/osha-hub-logo.svg" alt="OshaHub"/><div><b>Bring your wash team together.</b><span>Request business access to get started with OshaHub.</span></div><button className="cw-primary" onClick={onRegister}>Start your request <ArrowRight size={16}/></button></section>
-      </>:<PublicInfoPage page={page} onLogin={onLogin} onRegister={onRegister}/>}
+      </>:page==='pricing-sheet'?<PricingSheet/>:<PublicInfoPage page={page} onLogin={onLogin} onRegister={onRegister}/>}
     </main><footer className="cw-landing-footer"><div className="cw-landing-footer-brand"><img src="/osha-hub-logo.svg" alt="OshaHub"/><p><strong>Keep every wash moving.</strong><br/>Connected tools for car wash teams, owners and operators.</p></div><div className="cw-landing-footer-links"><div><b>PLATFORM</b><a href="#/product">Product</a><a href="#/platforms">Platforms</a><a href="#/pricing">Pricing</a></div><div><b>GET STARTED</b><a href="#/how-it-works">How it works</a><a href="#/faq">FAQs</a><button onClick={onRegister}>Request access</button></div><div><b>YOUR ACCOUNT</b><button onClick={onLogin}>Team sign in</button><a href="#/">Back to top</a></div><div><b>COMPANY</b><a href="#/about">About OshaHub</a><a href="#/faq">Contact &amp; FAQs</a><a href="#/developers">Integrations</a></div><div><b>SECURITY</b><a href="#/faq">Account approval</a><a href="#/platforms">Role-based access</a><a href="#/privacy">Privacy &amp; data</a></div></div><div className="cw-landing-footer-bottom"><span>© 2026 OshaHub · Car Wash Operations</span><span>Built for teams that keep Kenya moving.</span></div></footer>
   </div>;
 }
@@ -286,7 +286,7 @@ function PublicInfoPage({page,onLogin,onRegister}){
           <span>{isFaq?'FREQUENTLY ASKED QUESTIONS':item.kicker}</span>
           <h1>{isFaq?'Good to know before you start.':item.title}</h1>
           <p>{isFaq?'How business access, team invitations and wash operations work.':item.intro}</p>
-          <div><button className="cw-primary" onClick={onRegister}>Get started <ArrowRight size={16}/></button><button className="cw-info-back" onClick={onLogin}>Team sign in</button></div>
+          <div>{page==='pricing'?<button className="cw-primary" onClick={()=>{window.location.hash='/pricing-sheet'}}>View pricing <ArrowRight size={16}/></button>:<><button className="cw-primary" onClick={onRegister}>Get started <ArrowRight size={16}/></button><button className="cw-info-back" onClick={onLogin}>Team sign in</button></>}</div>
         </header>
         {!['pricing'].includes(page)&&<div className="cw-info-visual">
           <div className="cw-info-video-slot"><span className="cw-video-play"><Play size={19} fill="currentColor"/></span><div className="cw-info-video-art"><CarFront size={126} strokeWidth={1.25}/><i/><i/></div><div className="cw-info-video-label"><b>CAR WASH VIDEO</b><small>Video preview coming soon</small></div></div>
@@ -298,6 +298,22 @@ function PublicInfoPage({page,onLogin,onRegister}){
     </section>
   );
 }
+
+const OSHAHUB_PRICES=[['Starter','KES 2,900','1 branch · 3 staff · Core operations'],['Growth','KES 4,900','3 branches · 15 staff · Reports and loyalty'],['Enterprise','KES 9,900','Unlimited branches · Priority support']];
+function downloadPricingPdf(){
+  const lines=['OSHAHUB PRICING GUIDE','Car wash operations subscription plans','','STARTER  -  KES 2,900 per month','1 branch · 3 staff · Core operations','','GROWTH  -  KES 4,900 per month','3 branches · 15 staff · Reports and loyalty','','ENTERPRISE  -  KES 9,900 per month','Unlimited branches · Priority support','','Quarterly, annual and custom terms are available on request.','Final billing terms are confirmed during onboarding.'];
+  const escape=(text)=>text.replace(/[\\()]/g,'\\$&');
+  const stream=['BT','/F1 22 Tf','72 760 Td',`(${escape(lines[0])}) Tj`,'/F1 11 Tf'];
+  lines.slice(1).forEach((line)=>stream.push('0 -28 Td',`(${escape(line)}) Tj`));stream.push('ET');
+  const content=stream.join('\n');const objects=[
+    '<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [4 0 R] /Count 1 >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
+  ];
+  let pdf='%PDF-1.4\n';const offsets=[0];objects.forEach((object,index)=>{offsets.push(new TextEncoder().encode(pdf).length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});const xref=new TextEncoder().encode(pdf).length;pdf+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.slice(1).map((offset)=>`${String(offset).padStart(10,'0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  const url=URL.createObjectURL(new Blob([pdf],{type:'application/pdf'}));const link=document.createElement('a');link.href=url;link.download='oshahub-pricing-guide.pdf';link.click();URL.revokeObjectURL(url);
+}
+function PricingSheet(){return <section className="cw-pricing-sheet-page"><div className="cw-pricing-sheet-toolbar"><a href="#/pricing"><ArrowRight size={15}/> Back to pricing</a><button type="button" onClick={downloadPricingPdf}><Download size={17}/> Download PDF</button></div><article className="cw-pricing-sheet"><header><img src="/osha-hub-logo.svg" alt="OshaHub"/><div><h1>PRICING GUIDE</h1><p>Subscription plans for your car wash workspace.</p></div></header><h2>MONTHLY SUBSCRIPTION PLANS</h2><div className="cw-pricing-table"><table><thead><tr><th>Plan</th><th>Monthly price</th><th>What’s included</th></tr></thead><tbody>{OSHAHUB_PRICES.map(([plan,price,features])=><tr key={plan}><td>{plan}</td><td>{price}</td><td>{features}</td></tr>)}</tbody></table></div><div className="cw-pricing-sheet-notes"><section><h2>AVAILABLE TERMS</h2><p>Monthly, quarterly, annual and custom plans are available. The selected term is confirmed during onboarding.</p></section><section><h2>EVERY PLAN INCLUDES</h2><p>Business workspace, role-based access, wash queue, customer records and mobile-ready operations.</p></section></div></article></section>}
 
 function LoginScreen({onLogin,onBack,initialMode='login'}){
   const inviteToken=new URLSearchParams(window.location.search).get('invite')||'';
