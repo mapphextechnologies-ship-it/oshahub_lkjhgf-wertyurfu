@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 142" role="img" aria-labelledby="title desc">
+  <title id="title">OshaHub</title>
+  <desc id="desc">OshaHub — Where Car Wash Meets Technology</desc>
+  <defs>
+    <linearGradient id="oshahub" x1=".08" y1=".9" x2=".94" y2=".08">
+      <stop stop-color="#1673dc"/><stop offset=".5" stop-color="#27b8d0"/><stop offset="1" stop-color="#4fe2d0"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#35c4d5"/><stop offset="1" stop-color="#54e0ce"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(7 5)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M111 25a53 53 0 1 0 0 74" stroke="#136bce" stroke-width="12"/>
+    <path d="M34 70c12-35 43-42 62-24 17 16 7 41-15 45-17 3-31-6-31-21 0-12 11-22 25-22" stroke="url(#oshahub)" stroke-width="10"/>
+    <path d="M60 70c10 15 28 23 47 16" stroke="#40d9cb" stroke-width="7"/>
+    <path d="M104 48 123 37 143 48 143 70 123 81 104 70Z" stroke="url(#oshahub)" stroke-width="7"/>
+    <path d="M143 48 160 38m-17 32 18 11m-37 0v20m20-42h17" stroke="#46d6cf" stroke-width="5"/>
+    <circle cx="162" cy="36" r="6" fill="#43d8ce" stroke="none"/>
+    <circle cx="164" cy="81" r="6" fill="#2bc6d2" stroke="none"/>
+    <circle cx="123" cy="102" r="6" fill="#1673dc" stroke="none"/>
+    <circle cx="164" cy="59" r="5" fill="#49e0cf" stroke="none"/>
+  </g>
+  <text x="190" y="84" fill="#1e202b" font-family="Inter,Manrope,Arial,sans-serif" font-size="69" font-weight="750" letter-spacing="-3">Osha</text>
+  <text x="355" y="84" fill="url(#word)" font-family="Inter,Manrope,Arial,sans-serif" font-size="69" font-weight="750" letter-spacing="-3">Hub</text>
+  <text x="195" y="117" fill="#68788d" font-family="Inter,Arial,sans-serif" font-size="19" font-weight="500" letter-spacing=".35">Where Car Wash Meets Technology.</text>
+</svg>

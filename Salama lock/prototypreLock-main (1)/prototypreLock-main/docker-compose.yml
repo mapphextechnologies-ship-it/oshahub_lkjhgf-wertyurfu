@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: salama-lock-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-salama_lock}
+      POSTGRES_USER: ${DB_USER:-salama}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-salama}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: salama-lock-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      args:
+        BUILD_SKIP_TESTS: ${BUILD_SKIP_TESTS:-false}
+    image: salama-lock:local
+    container_name: salama-lock-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-salama_lock}
+      DB_USER: ${DB_USER:-salama}
+      DB_PASSWORD: ${DB_PASSWORD:-salama}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-salama-lock-dev-secret-change-me-in-production-32bytes-min}
+      SALAMA_ADMIN_API_KEY: ${SALAMA_ADMIN_API_KEY:-salama-local-admin}
+      SALAMA_CALLBACK_SECRET: ${SALAMA_CALLBACK_SECRET:-salama-local-callback}
+      ALLOW_IMEI_LOCK: ${ALLOW_IMEI_LOCK:-true}
+      PROVIDER_ACTIVE: ${PROVIDER_ACTIVE:-MOCK_GOOGLE_DLC}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+UseContainerSupport}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

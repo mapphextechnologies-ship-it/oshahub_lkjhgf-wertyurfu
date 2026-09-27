@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: salama-lock
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+      repositories:
+        enabled: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  health:
+    redis:
+      # Connection prepared for future queue use; keep visible in actuator
+      enabled: true
+
+salama:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:salama-lock-dev-secret-change-me-in-production-32bytes-min}
+      expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+    # Protects /api/v1/admin/** — set in every non-local environment
+    admin-api-key: ${SALAMA_ADMIN_API_KEY:}
+    # Protects POST /api/v1/callback/google
+    callback-secret: ${SALAMA_CALLBACK_SECRET:}
+    cors-allowed-origins:
+      - ${CORS_ORIGIN:http://localhost:8080}
+  queue:
+    poll-interval-ms: ${QUEUE_POLL_MS:2000}
+    batch-size: ${QUEUE_BATCH_SIZE:20}
+  retry:
+    delays-seconds: 30,60,300,900
+  provider:
+    mock:
+      fail-rate: ${MOCK_FAIL_RATE:0.0}
+      unavailable-rate: ${MOCK_UNAVAILABLE_RATE:0.0}
+      latency-ms: ${MOCK_LATENCY_MS:50}
+  identity:
+    # Prefer lockId for lock/unlock. IMEI fallback is transitional.
+    allow-imei-lock: ${ALLOW_IMEI_LOCK:true}
+
+# Console/stdout only — suitable for Docker (no file appenders)
+logging:
+  level:
+    root: INFO
+    com.salama.lock: INFO

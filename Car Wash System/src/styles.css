@@ -1,0 +1,23 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, Manrope, "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #f4f6fa;
+  color: #17253a;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { min-width: 320px; min-height: 100%; scroll-behavior: smooth; }
+body { min-width: 320px; min-height: 100vh; margin: 0; }
+body, button, input, select, textarea { font-family: Inter, Manrope, "Segoe UI", system-ui, -apple-system, sans-serif; }
+button, input, select, textarea { font-size: inherit; }
+button { cursor: pointer; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #65aaf9; outline-offset: 2px; }
+#root { min-height: 100vh; }
+img, svg { display: block; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

@@ -1,0 +1,143 @@
+.pageTitle {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f1623;
+  margin-bottom: 4px;
+}
+
+.pageSub {
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 28px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e2e6ed;
+  border-radius: 10px;
+  padding: 28px;
+  margin-bottom: 20px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f1623;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f3f7;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldFull {
+  grid-column: 1 / -1;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.input,
+.select,
+.textarea {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #e2e6ed;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #0f1623;
+  background: #f8f9fb;
+  outline: none;
+  transition: border-color 0.15s;
+  font-family: inherit;
+}
+
+.textarea {
+  height: 80px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: #1e3a5f;
+  background: #fff;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.submitBtn {
+  padding: 10px 24px;
+  background: #0f1623;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.submitBtn:hover {
+  background: #1e3a5f;
+}
+
+.submitBtn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+.cancelBtn {
+  padding: 10px 24px;
+  background: #fff;
+  color: #374151;
+  border: 1px solid #e2e6ed;
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.cancelBtn:hover {
+  background: #f1f3f7;
+}
+
+.success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 14px 18px;
+  font-size: 13px;
+  color: #16a34a;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

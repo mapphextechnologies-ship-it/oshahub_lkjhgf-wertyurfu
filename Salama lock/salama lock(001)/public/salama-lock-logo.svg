@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160" role="img" aria-labelledby="title desc">
+  <title id="title">SalamaLock</title>
+  <desc id="desc">A shield with a green padlock beside the SalamaLock wordmark.</desc>
+  <rect width="640" height="160" rx="20" fill="#ffffff"/>
+  <g transform="translate(20 18)">
+    <path d="M57 3 105 20v37c0 34-19 56-48 67C28 113 9 91 9 57V20L57 3Z" fill="none" stroke="#172119" stroke-width="7"/>
+    <path d="M57 13v101" stroke="#5fbf45" stroke-width="5" opacity=".8"/>
+    <path d="M24 56c-15 5-22 12-24 22M90 56c15 5 22 12 24 22" fill="none" stroke="#172119" stroke-width="5" stroke-linecap="round"/>
+    <rect x="33" y="49" width="48" height="44" rx="7" fill="#5fbf45" stroke="#172119" stroke-width="5"/>
+    <path d="M43 49V40a14 14 0 0 1 28 0v9" fill="none" stroke="#172119" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="57" cy="68" r="5" fill="#172119"/>
+    <path d="M57 73v10" stroke="#172119" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <text x="150" y="97" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="2"><tspan fill="#5fbf45">SALAMA</tspan><tspan fill="#172119">LOCK</tspan></text>
+</svg>

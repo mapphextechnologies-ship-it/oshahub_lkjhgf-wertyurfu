@@ -1,0 +1,38 @@
+# Activate with: SPRING_PROFILES_ACTIVE=prod
+# Required env vars (app refuses to start without secrets):
+#   JWT_SECRET
+#   SALAMA_ADMIN_API_KEY
+#   SALAMA_CALLBACK_SECRET
+#   DB_HOST, DB_NAME, DB_USER, DB_PASSWORD
+#   REDIS_HOST
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+salama:
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+    admin-api-key: ${SALAMA_ADMIN_API_KEY}
+    callback-secret: ${SALAMA_CALLBACK_SECRET}
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+logging:
+  level:
+    root: INFO
+    com.salama.lock: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

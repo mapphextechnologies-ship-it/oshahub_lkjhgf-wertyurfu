@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:salama_lock}
+    username: ${DB_USER:salama}
+    password: ${DB_PASSWORD:salama}
+    driver-class-name: org.postgresql.Driver
+
+# Local defaults — override via env for anything shared/staging
+salama:
+  security:
+    admin-api-key: ${SALAMA_ADMIN_API_KEY:salama-local-admin}
+    callback-secret: ${SALAMA_CALLBACK_SECRET:salama-local-callback}
+
+logging:
+  level:
+    root: INFO
+    com.salama.lock: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN

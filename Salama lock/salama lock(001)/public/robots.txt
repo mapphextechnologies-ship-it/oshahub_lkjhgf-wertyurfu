@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+Disallow: /api/
+
+Sitemap: https://www.SALAMA LOCKpay.com/sitemap.xml

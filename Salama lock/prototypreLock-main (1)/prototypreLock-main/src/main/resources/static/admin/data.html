@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Database Viewer — Salama Lock</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --text: #e8eef4;
+      --muted: #8b9aab;
+      --accent: #3d9b6a;
+      --border: #2a3542;
+      --danger: #c45c5c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(ellipse 80% 50% at 10% 0%, #1a3d2e 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    header {
+      position: sticky; top: 0; z-index: 5;
+      background: rgba(15, 20, 25, 0.95);
+      border-bottom: 1px solid var(--border);
+      padding: 0.9rem 1.25rem;
+    }
+    .top {
+      max-width: 1200px; margin: 0 auto;
+      display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem;
+      align-items: center; justify-content: space-between;
+    }
+    .brand { color: var(--accent); font-weight: 650; }
+    .links a { color: var(--muted); text-decoration: none; margin-right: 0.9rem; font-size: 0.9rem; }
+    .links a:hover { color: var(--accent); }
+    main { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
+    .hint {
+      color: var(--muted); font-size: 0.92rem; margin: 0 0 1rem;
+    }
+    .counts {
+      display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;
+    }
+    .chip {
+      appearance: none;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.88rem;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .chip:hover { border-color: var(--accent); color: var(--text); }
+    .chip.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #06140c;
+      font-weight: 650;
+    }
+    .chip strong { margin-left: 0.3rem; color: inherit; }
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center;
+      margin-bottom: 0.85rem;
+    }
+    .toolbar button {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid #2a5a42;
+      border-radius: 8px;
+      padding: 0.45rem 0.85rem;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.9rem;
+    }
+    .toolbar button.danger {
+      color: #f0c4c4;
+      border-color: #5a3030;
+    }
+    .showing {
+      color: var(--muted); font-size: 0.9rem; margin-left: 0.25rem;
+    }
+    .showing b { color: var(--text); }
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      max-height: 70vh;
+      min-height: 180px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td {
+      text-align: left; padding: 0.55rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top; white-space: nowrap;
+    }
+    th {
+      position: sticky; top: 0; background: #151c24; color: var(--muted);
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    td.wrap { white-space: pre-wrap; max-width: 320px; word-break: break-word; }
+    .empty, .error { padding: 1.5rem; color: var(--muted); }
+    .error { color: #f0c4c4; }
+    .status-LOCKED, .status-SUCCESS { color: #6fd39a; }
+    .status-PENDING, .status-RETRYING, .status-PROCESSING, .status-REGISTERED { color: #e0c35a; }
+    .status-FAILED, .status-DEACTIVATED { color: #e08888; }
+  </style>
+  <script src="/admin/admin-auth.js"></script>
+</head>
+<body>
+  <header>
+    <div class="top">
+      <div class="brand">Salama Lock · Database viewer</div>
+      <div class="links">
+        <a href="/">Home</a>
+        <a href="/guide">System guide</a>
+        <a href="/admin">Issue API key</a>
+        <a href="/admin/companies">Companies &amp; devices</a>
+        <a href="/admin/monitor">Health &amp; logs</a>
+      </div>
+    </div>
+  </header>
+  <main>
+    <p class="hint">
+      Click a table chip below to inspect real Postgres rows.
+      Extra rows you did not enter were from earlier local smoke tests — use
+      <strong>Clear business data</strong> for a clean start. Seeded
+      <code>system_configs</code> / global provider config stay.
+    </p>
+
+    <div class="counts" id="counts"></div>
+
+    <div class="toolbar">
+      <button type="button" id="btn-refresh">Refresh</button>
+      <button type="button" class="danger" id="btn-clear">Clear business data</button>
+      <span class="showing">Showing: <b id="showing-label">commands</b></span>
+    </div>
+
+    <div class="table-wrap" id="table-wrap">
+      <div class="empty">Loading…</div>
+    </div>
+  </main>
+
+  <script>
+(function () {
+  var TABLES = [
+    { id: "companies", countKey: "companies", path: "/api/v1/admin/data/companies", label: "companies" },
+    { id: "api_keys", countKey: "api_keys", path: "/api/v1/admin/data/api-keys", label: "api_keys" },
+    { id: "devices", countKey: "devices", path: "/api/v1/admin/data/devices", label: "devices" },
+    { id: "commands", countKey: "commands", path: "/api/v1/admin/data/commands?limit=100", label: "commands" },
+    { id: "audit_logs", countKey: "audit_logs", path: "/api/v1/admin/data/audit-logs?limit=100", label: "audit_logs" },
+    { id: "google_callbacks", countKey: "google_callbacks", path: "/api/v1/admin/data/google-callbacks", label: "google_callbacks" },
+    { id: "provider_configs", countKey: "provider_configs", path: "/api/v1/admin/data/provider-configs", label: "provider_configs" },
+    { id: "system_configs", countKey: "system_configs", path: "/api/v1/admin/data/system-configs", label: "system_configs" }
+  ];
+
+  var active = "commands";
+  var countsEl = document.getElementById("counts");
+  var wrap = document.getElementById("table-wrap");
+  var showingLabel = document.getElementById("showing-label");
+
+  function findTable(id) {
+    for (var i = 0; i < TABLES.length; i++) {
+      if (TABLES[i].id === id) return TABLES[i];
+    }
+    return TABLES[0];
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (ch) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch];
+    });
+  }
+
+  function setActive(id) {
+    active = id;
+    showingLabel.textContent = findTable(id).label;
+    var chips = countsEl.querySelectorAll(".chip");
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].classList.toggle("active", chips[i].getAttribute("data-table") === id);
+    }
+    loadTable();
+  }
+
+  function renderCounts(data) {
+    var html = "";
+    for (var i = 0; i < TABLES.length; i++) {
+      var t = TABLES[i];
+      var n = data && data[t.countKey] != null ? data[t.countKey] : "–";
+      var activeCls = t.id === active ? " active" : "";
+      html += '<button type="button" class="chip' + activeCls + '" data-table="' + t.id + '">' +
+        t.label + "<strong>" + n + "</strong></button>";
+    }
+    countsEl.innerHTML = html;
+  }
+
+  function loadCounts() {
+    return SalamaAdminAuth.adminFetch("/api/v1/admin/data/overview")
+      .then(function (res) {
+        if (!res.ok) throw new Error("overview HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) { renderCounts(data); })
+      .catch(function (err) {
+        countsEl.innerHTML = '<span class="error">Counts failed: ' + escapeHtml(err.message) + "</span>";
+      });
+  }
+
+  function loadTable() {
+    var table = findTable(active);
+    wrap.innerHTML = '<div class="empty">Loading ' + escapeHtml(table.label) + "…</div>";
+    return SalamaAdminAuth.adminFetch(table.path)
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (rows) {
+        if (!rows || !rows.length) {
+          wrap.innerHTML = '<div class="empty">No rows in <strong>' +
+            escapeHtml(table.label) + "</strong> yet. Create a company / register a device / lock to see data here.</div>";
+          return;
+        }
+        var cols = Object.keys(rows[0]);
+        var thead = cols.map(function (c) { return "<th>" + escapeHtml(c) + "</th>"; }).join("");
+        var tbody = rows.map(function (row) {
+          return "<tr>" + cols.map(function (c) {
+            var val = row[c];
+            if (val !== null && typeof val === "object") val = JSON.stringify(val);
+            if (val === null || val === undefined) val = "";
+            var str = String(val);
+            var cls = "";
+            if (str.length > 48 || c.indexOf("response") >= 0 || c.indexOf("payload") >= 0 || c === "scopes") {
+              cls = ' class="wrap"';
+            }
+            if (c === "status" || c === "command_type" || c === "event_type") {
+              cls = ' class="status-' + escapeHtml(str) + '"';
+            }
+            return "<td" + cls + ">" + escapeHtml(str) + "</td>";
+          }).join("") + "</tr>";
+        }).join("");
+        wrap.innerHTML = "<table><thead><tr>" + thead + "</tr></thead><tbody>" + tbody + "</tbody></table>";
+      })
+      .catch(function (err) {
+        wrap.innerHTML = '<div class="error">Failed to load <strong>' +
+          escapeHtml(table.label) + "</strong>: " + escapeHtml(err.message) + "</div>";
+      });
+  }
+
+  // Event delegation — chips always work even after re-render
+  countsEl.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-table]");
+    if (!btn) return;
+    e.preventDefault();
+    setActive(btn.getAttribute("data-table"));
+  });
+
+  document.getElementById("btn-refresh").addEventListener("click", function () {
+    loadCounts().then(loadTable);
+  });
+
+  document.getElementById("btn-clear").addEventListener("click", function () {
+    if (!confirm("Delete all companies, API keys, devices, commands, callbacks, and audit logs?\n\nKeeps system_configs and the global mock provider.")) {
+      return;
+    }
+    SalamaAdminAuth.adminFetch("/api/v1/admin/data/reset-business-data", { method: "POST" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (result) {
+        alert("Cleared. Deleted: " + JSON.stringify(result));
+        return loadCounts().then(loadTable);
+      })
+      .catch(function (err) {
+        alert("Clear failed: " + err.message);
+      });
+  });
+
+  loadCounts().then(loadTable);
+})();
+  </script>
+</body>
+</html>

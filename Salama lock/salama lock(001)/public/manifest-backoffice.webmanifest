@@ -1,0 +1,19 @@
+{
+  "name": "SALAMA LOCK Back Office",
+  "short_name": "SALAMA LOCK Back Office",
+  "description": "Back Office screening workspace for SALAMA LOCK Paygo customer applications.",
+  "id": "/backoffice/overview",
+  "start_url": "/backoffice/overview",
+  "scope": "/backoffice/",
+  "display": "standalone",
+  "background_color": "#f6f9fc",
+  "theme_color": "#25863f",
+  "icons": [
+    {
+      "src": "/salama-lock-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

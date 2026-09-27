@@ -1,0 +1,225 @@
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.pageTitle {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f1623;
+}
+
+.pageSub {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 3px;
+}
+
+.addBtn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  background: #0f1623;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.addBtn:hover {
+  background: #1e3a5f;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.search {
+  flex: 1;
+  min-width: 200px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #e2e6ed;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #0f1623;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search:focus {
+  border-color: #1e3a5f;
+}
+
+.filterBtn {
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #e2e6ed;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #374151;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filterBtnActive {
+  background: #0f1623;
+  color: #fff;
+  border-color: #0f1623;
+}
+
+.tableCard {
+  background: #fff;
+  border: 1px solid #e2e6ed;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tableMeta {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f1f3f7;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e6ed;
+  background: #f8f9fb;
+}
+
+.table tbody tr {
+  transition: background 0.1s;
+  cursor: pointer;
+}
+
+.table tbody tr:hover {
+  background: #f8f9fb;
+}
+
+.table tbody td {
+  padding: 13px 16px;
+  font-size: 13px;
+  color: #374151;
+  border-bottom: 1px solid #f1f3f7;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.orgName {
+  font-weight: 600;
+  color: #0f1623;
+}
+
+.orgEmail {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.planBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.statusActive {
+  background: #16a34a18;
+  color: #16a34a;
+}
+
+.statusPending {
+  background: #2563eb18;
+  color: #2563eb;
+}
+
+.statusSuspended {
+  background: #dc262618;
+  color: #dc2626;
+}
+
+.planStarter {
+  background: #6b728018;
+  color: #6b7280;
+}
+
+.planGrowth {
+  background: #2563eb18;
+  color: #2563eb;
+}
+
+.planBusiness {
+  background: #1e3a5f18;
+  color: #1e3a5f;
+}
+
+.planEnterprise {
+  background: #7c3aed18;
+  color: #7c3aed;
+}
+
+.actionBtn {
+  padding: 5px 12px;
+  border: 1px solid #e2e6ed;
+  border-radius: 5px;
+  font-size: 12px;
+  color: #374151;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.actionBtn:hover {
+  background: #0f1623;
+  color: #fff;
+  border-color: #0f1623;
+}
+
+.muted {
+  color: #9ca3af;
+}

@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Salama Lock Agent",
+    "slug": "salama-lock-agent",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#102A43"
+    },
+    "android": {
+      "package": "com.salamalock.agent",
+      "versionCode": 1,
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#102A43"
+      },
+      "permissions": ["CAMERA"]
+    },
+    "plugins": [
+      "expo-secure-store",
+      ["expo-image-picker", {
+        "cameraPermission": "Allow Salama Lock Agent to capture customer identity and device documents.",
+        "photosPermission": "Allow Salama Lock Agent to select customer documents."
+      }]
+    ]
+  }
+}

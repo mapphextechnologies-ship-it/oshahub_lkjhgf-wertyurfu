@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Reference — Salama Lock Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/styles/github-dark.min.css" id="hljsTheme">
+  <link rel="stylesheet" href="assets/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/highlight.min.js"></script>
+
+</head>
+<body>
+  <div class="mobile-bar">
+    <strong>Salama Lock Docs</strong>
+    <button type="button" id="menuToggle">Menu</button>
+  </div>
+  <div class="overlay" id="navOverlay"></div>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <strong>Salama Lock</strong>
+        <span>Documentation</span>
+      </div>
+      <input class="search" id="navSearch" type="search" placeholder="Filter pages…" aria-label="Filter navigation" />
+      <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="api.html" class="active">API Reference</a>
+      <a href="partner-handbook.html">Partner Handbook</a>
+      <a href="database.html">Database</a>
+      <a href="security.html">Security</a>
+      <a href="providers.html">Providers</a>
+      <a href="configuration.html">Configuration</a>
+      <a href="admin-guide.html">Admin Guide</a>
+      <a href="deployment.html">Deployment</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="changelog.html">Changelog</a>
+      <a href="verification-report.html">Verification Report</a>
+      </nav>
+      <div class="sidebar-footer">
+        <button type="button" class="btn-icon" id="themeToggle">Theme</button>
+      </div>
+    </aside>
+    <div class="content-wrap">
+      <article class="doc">
+        <header class="doc-header">
+          <p class="eyebrow">HTTP surface</p>
+          <h1>API Reference</h1>
+          <p>Every HTTP endpoint discovered in Spring controllers. Auth, scopes, bodies, and status codes match the current code.</p>
+        </header>
+
+    <h2>Conventions</h2>
+    <ul>
+      <li>Base URL (local): <code>http://localhost:8080</code></li>
+      <li>Partner auth: <code>X-Api-Key: sk_live_…</code> <em>or</em> <code>Authorization: Bearer &lt;jwt&gt;</code></li>
+      <li>Admin auth: <code>X-Admin-Key</code> (required when configured)</li>
+      <li>Callback auth: <code>X-Callback-Secret</code> (required when configured)</li>
+      <li>Correlation: optional request header <code>X-Correlation-Id</code>; always echoed on responses for audited paths</li>
+      <li>Error body shape: <code>ApiError</code> via <code>GlobalExceptionHandler</code> (see Error Reference below)</li>
+      <li>Method security authorities use prefix <code>SCOPE_</code> (e.g. scope <code>devices:read</code> → authority <code>SCOPE_devices:read</code>)</li>
+    </ul>
+
+    <h2>Endpoint index</h2>
+    <table>
+      <tr><th>Method</th><th>Path</th><th>Auth</th><th>Scope / role</th></tr>
+      <tr><td>POST</td><td><code>/api/v1/auth/token</code></td><td>API key</td><td>—</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/devices</code></td><td>Partner</td><td><code>devices:write</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/devices</code></td><td>Partner</td><td><code>devices:read</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/devices/{lockId}</code></td><td>Partner</td><td><code>devices:read</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/devices/by-imei/{imei}</code></td><td>Partner</td><td><code>devices:read</code></td></tr>
+      <tr><td>DELETE</td><td><code>/api/v1/devices/{lockId}</code></td><td>Partner</td><td><code>devices:write</code></td></tr>
+      <tr><td>POST</td><td><code>/api/v1/lock</code></td><td>Partner</td><td><code>commands:write</code></td></tr>
+      <tr><td>POST</td><td><code>/api/v1/unlock</code></td><td>Partner</td><td><code>commands:write</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/commands/{id}</code></td><td>Partner</td><td><code>commands:read</code></td></tr>
+      <tr><td>POST</td><td><code>/api/v1/callback/google</code></td><td>Callback secret*</td><td>—</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/monitoring/statistics</code></td><td>Partner</td><td>authenticated (no scope annotation)</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/monitoring/provider</code></td><td>Partner</td><td>authenticated</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/monitoring/queue</code></td><td>Partner</td><td>authenticated</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/admin/companies</code></td><td>Admin</td><td><code>ROLE_ADMIN</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/companies-overview</code></td><td>Admin</td><td><code>ROLE_ADMIN</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/data/*</code></td><td>Admin</td><td><code>ROLE_ADMIN</code></td></tr>
+      <tr><td>POST</td><td><code>/api/v1/admin/data/reset-business-data</code></td><td>Admin</td><td><code>ROLE_ADMIN</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/monitoring/dashboard</code></td><td>Admin</td><td><code>ROLE_ADMIN</code></td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/monitoring/logs</code></td><td>Admin</td><td><code>ROLE_ADMIN</code></td></tr>
+      <tr><td>GET</td><td><code>/actuator/health</code>, <code>/actuator/info</code></td><td>Public</td><td>—</td></tr>
+      <tr><td>*</td><td><code>/actuator/**</code> (other)</td><td>Denied</td><td><code>denyAll</code></td></tr>
+    </table>
+    <p>* Callback secret enforced only when <code>salama.security.callback-secret</code> is non-empty.</p>
+
+    <h2>POST /api/v1/auth/token</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge post">POST</span> <code>/api/v1/auth/token</code></div>
+      <dl class="meta-grid">
+        <dt>Auth</dt><dd>API key via <code>X-Api-Key</code> or <code>Authorization: ApiKey &lt;key&gt;</code>. PermitAll in security chain; controller validates key.</dd>
+        <dt>Success</dt><dd><code>200</code></dd>
+        <dt>Errors</dt><dd><code>401</code> missing/invalid key</dd>
+      </dl>
+      <h4>Response</h4>
+      <pre><code class="language-json">{
+  "accessToken": "&lt;jwt&gt;",
+  "tokenType": "Bearer",
+  "expiresInSeconds": 3600,
+  "companyCode": "ACME",
+  "scopes": ["devices:read","devices:write","commands:write","commands:read"]
+}</code></pre>
+      <div class="note"><code>expiresInSeconds</code> is hardcoded to <code>3600</code> in <code>AuthController</code>; JWT lifetime is actually <code>salama.security.jwt.expiration-ms</code> (default 3600000 ms).</div>
+    </div>
+
+    <h2>POST /api/v1/devices</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge post">POST</span> <code>/api/v1/devices</code></div>
+      <dl class="meta-grid">
+        <dt>Scope</dt><dd><code>devices:write</code></dd>
+        <dt>Success</dt><dd><code>201 Created</code> → <code>DeviceResponse</code></dd>
+      </dl>
+      <h4>Request body — RegisterDeviceRequest</h4>
+      <table>
+        <tr><th>Field</th><th>Required</th><th>Validation / notes</th></tr>
+        <tr><td><code>imei1</code></td><td>yes*</td><td>Pattern <code>^\d{14,17}$</code>. *or legacy <code>imei</code></td></tr>
+        <tr><td><code>imei</code></td><td>legacy</td><td>Same pattern; used if <code>imei1</code> blank</td></tr>
+        <tr><td><code>imei2</code></td><td>no</td><td>14–17 digits; must differ from imei1</td></tr>
+        <tr><td><code>serialNumber</code></td><td>no</td><td>max 128 → identifier SERIAL</td></tr>
+        <tr><td><code>googleDeviceId</code></td><td>no</td><td>max 256 → GOOGLE_DEVICE_ID</td></tr>
+        <tr><td><code>googleLockId</code></td><td>no</td><td>max 256 → GOOGLE_LOCK_ID</td></tr>
+        <tr><td><code>deviceType</code></td><td>no</td><td>PHONE (default), LAPTOP, TABLET, OTHER</td></tr>
+        <tr><td><code>manufacturer</code>/<code>model</code></td><td>no</td><td>max 128</td></tr>
+        <tr><td><code>metadata</code></td><td>no</td><td>JSON object → devices.metadata</td></tr>
+        <tr><td><code>lockId</code></td><td>ignored</td><td>Deprecated; Salama always generates <code>SL-&lt;ULID&gt;</code></td></tr>
+      </table>
+      <pre><code class="language-json">{
+  "imei1": "359759002014300",
+  "imei2": "359759002014318",
+  "serialNumber": "SN-123",
+  "manufacturer": "Samsung",
+  "model": "A54",
+  "metadata": { "loanId": "LOAN-22" }
+}</code></pre>
+      <h4>Response — DeviceResponse</h4>
+      <pre><code class="language-json">{
+  "lockId": "SL-01K5A8FYD4QQ8E4T2G5S6H1C8P",
+  "status": "REGISTERED",
+  "imei": "359759002014300",
+  "imei1": "359759002014300",
+  "imei2": "359759002014318",
+  "serialNumber": "SN-123",
+  "googleDeviceId": null,
+  "googleLockId": null,
+  "deviceType": "PHONE",
+  "manufacturer": "Samsung",
+  "model": "A54",
+  "metadata": { "loanId": "LOAN-22" },
+  "identifiers": [
+    { "type": "IMEI", "value": "359759002014300", "primary": true },
+    { "type": "IMEI", "value": "359759002014318", "primary": false }
+  ],
+  "registeredAt": "2026-07-23T04:00:00Z",
+  "deactivatedAt": null,
+  "createdAt": "2026-07-23T04:00:00Z",
+  "updatedAt": "2026-07-23T04:00:00Z"
+}</code></pre>
+      <p>Business errors: <code>409 DEVICE_EXISTS</code>, <code>401 COMPANY_NOT_FOUND</code>, <code>500 LOCK_ID_GENERATION_FAILED</code>, <code>400 VALIDATION_ERROR</code>.</p>
+    </div>
+
+    <h2>GET /api/v1/devices</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge get">GET</span> <code>/api/v1/devices</code></div>
+      <dl class="meta-grid">
+        <dt>Scope</dt><dd><code>devices:read</code></dd>
+        <dt>Success</dt><dd><code>200</code> → <code>DeviceResponse[]</code> for the authenticated company</dd>
+      </dl>
+    </div>
+
+    <h2>GET /api/v1/devices/{lockId}</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge get">GET</span> <code>/api/v1/devices/{lockId}</code></div>
+      <dl class="meta-grid">
+        <dt>Scope</dt><dd><code>devices:read</code></dd>
+        <dt>Success</dt><dd><code>200</code></dd>
+        <dt>Errors</dt><dd><code>404 DEVICE_NOT_FOUND</code></dd>
+      </dl>
+    </div>
+
+    <h2>GET /api/v1/devices/by-imei/{imei}</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge get">GET</span> <code>/api/v1/devices/by-imei/{imei}</code></div>
+      <dl class="meta-grid">
+        <dt>Scope</dt><dd><code>devices:read</code></dd>
+        <dt>Lookup</dt><dd><code>device_identifiers</code> (IMEI) then legacy <code>devices.imei</code></dd>
+        <dt>Errors</dt><dd><code>404 DEVICE_NOT_FOUND</code></dd>
+      </dl>
+      <div class="warn">Transitional. Prefer lockId lookup.</div>
+    </div>
+
+    <h2>DELETE /api/v1/devices/{lockId}</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge delete">DELETE</span> <code>/api/v1/devices/{lockId}</code></div>
+      <dl class="meta-grid">
+        <dt>Scope</dt><dd><code>devices:write</code></dd>
+        <dt>Success</dt><dd><code>200</code> with device <code>status: DEACTIVATED</code> (idempotent if already DEACTIVATED/RETIRED)</dd>
+      </dl>
+      <p>Sets <code>deactivatedAt</code>. Soft deactivate only — row remains.</p>
+    </div>
+
+    <h2>POST /api/v1/lock &amp; POST /api/v1/unlock</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge post">POST</span> <code>/api/v1/lock</code> &nbsp; <span class="badge post">POST</span> <code>/api/v1/unlock</code></div>
+      <dl class="meta-grid">
+        <dt>Scope</dt><dd><code>commands:write</code></dd>
+        <dt>Success</dt><dd><code>202 Accepted</code> + header <code>Location: /api/v1/commands/{commandId}</code> + <code>CommandResponse</code></dd>
+      </dl>
+      <h4>Request — LockUnlockRequest</h4>
+      <table>
+        <tr><th>Field</th><th>Required</th><th>Notes</th></tr>
+        <tr><td><code>lockId</code></td><td>preferred</td><td>max 128; preferred identity</td></tr>
+        <tr><td><code>imei</code></td><td>fallback</td><td>14–17 digits; allowed only if <code>salama.identity.allow-imei-lock=true</code></td></tr>
+        <tr><td><code>idempotencyKey</code></td><td>no</td><td>max 128; unique per company — returns existing command</td></tr>
+        <tr><td><code>externalRef</code></td><td>no</td><td>max 128 partner reference</td></tr>
+      </table>
+      <p>Class-level validation: <code>lockId or imei is required</code>.</p>
+      <pre><code class="language-json">{
+  "lockId": "SL-01K5A8FYD4QQ8E4T2G5S6H1C8P",
+  "idempotencyKey": "fin-inv-1001",
+  "externalRef": "INV-1001"
+}</code></pre>
+      <h4>Response — CommandResponse</h4>
+      <pre><code class="language-json">{
+  "commandId": "632055db-9711-4a98-b9bc-5b0ade778f74",
+  "lockId": "SL-01K5A8FYD4QQ8E4T2G5S6H1C8P",
+  "commandType": "LOCK",
+  "status": "PENDING",
+  "provider": "GOOGLE_DLC",
+  "externalRef": "INV-1001",
+  "idempotencyKey": "fin-inv-1001",
+  "correlationId": "a1b2c3d4-…",
+  "createdAt": "2026-07-23T04:01:00Z",
+  "pollAfterSeconds": 2,
+  "links": {
+    "self": "/api/v1/commands/632055db-9711-4a98-b9bc-5b0ade778f74",
+    "device": "/api/v1/devices/SL-01K5A8FYD4QQ8E4T2G5S6H1C8P"
+  }
+}</code></pre>
+      <p><code>retryCount</code>, <code>errorCode</code>, <code>errorMessage</code>, <code>completedAt</code>, <code>nextRetryAt</code> appear when non-null (<code>@JsonInclude(NON_NULL)</code>). No IMEI in command responses.</p>
+      <p>Business errors: <code>404 DEVICE_NOT_FOUND</code>, <code>409 DEVICE_NOT_COMMANDABLE</code>, <code>400 LOCK_ID_REQUIRED</code>, <code>400 LOCK_ID_MISMATCH</code>, <code>401 COMPANY_NOT_FOUND</code>.</p>
+    </div>
+
+    <h2>GET /api/v1/commands/{id}</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge get">GET</span> <code>/api/v1/commands/{id}</code></div>
+      <dl class="meta-grid">
+        <dt>Scope</dt><dd><code>commands:read</code></dd>
+        <dt>Path</dt><dd>UUID command id</dd>
+        <dt>Errors</dt><dd><code>404 COMMAND_NOT_FOUND</code> (wrong id or other company)</dd>
+      </dl>
+      <h4>pollAfterSeconds</h4>
+      <table>
+        <tr><th>Status</th><th>Value</th></tr>
+        <tr><td>PENDING, PROCESSING</td><td><code>ceil(salama.queue.poll-interval-ms / 1000)</code>, minimum 1</td></tr>
+        <tr><td>RETRYING</td><td>seconds until <code>nextRetryAt</code> (min 1), else first retry delay</td></tr>
+        <tr><td>SUCCESS, FAILED</td><td><code>null</code> (omitted)</td></tr>
+      </table>
+    </div>
+
+    <h2>POST /api/v1/callback/google</h2>
+    <div class="endpoint">
+      <div class="path"><span class="badge post">POST</span> <code>/api/v1/callback/google</code></div>
+      <dl class="meta-grid">
+        <dt>Security</dt><dd>PermitAll + optional <code>X-Callback-Secret</code></dd>
+        <dt>Success</dt><dd><code>200</code></dd>
+      </dl>
+      <h4>Request — GoogleCallbackRequest</h4>
+      <table>
+        <tr><th>Field</th><th>Required</th><th>Notes</th></tr>
+        <tr><td><code>lockId</code></td><td>yes</td><td><code>@NotBlank</code></td></tr>
+        <tr><td><code>eventType</code></td><td>yes</td><td>LOCKED | UNLOCKED | FAILED</td></tr>
+        <tr><td><code>imei</code></td><td>no</td><td>fallback device lookup</td></tr>
+        <tr><td><code>commandId</code></td><td>no</td><td>UUID string to attach/update command</td></tr>
+        <tr><td><code>providerEventId</code></td><td>no</td><td>idempotency; duplicates return DUPLICATE</td></tr>
+        <tr><td><code>payload</code></td><td>no</td><td>opaque JSON map</td></tr>
+      </table>
+      <pre><code class="language-json">// PROCESSED
+{ "status": "PROCESSED", "id": "&lt;callback-uuid&gt;", "deviceStatus": "LOCKED" }
+
+// DUPLICATE
+{ "status": "DUPLICATE", "id": "&lt;existing-callback-uuid&gt;" }</code></pre>
+    </div>
+
+    <h2>Monitoring (partner-authenticated)</h2>
+    <div class="endpoint">
+      <p>No <code>@PreAuthorize</code> scope checks — any authenticated partner principal can call these.</p>
+      <ul>
+        <li><code>GET /api/v1/monitoring/statistics</code> → devicesTotal, commandsByStatus, pendingCallbacks</li>
+        <li><code>GET /api/v1/monitoring/provider</code> → activeProvider, configuredProvider</li>
+        <li><code>GET /api/v1/monitoring/queue</code> → pending/retrying/processing counts, enabled flag</li>
+      </ul>
+      <div class="warn">These return <strong>global</strong> counts (not company-scoped) because repositories use aggregate <code>count()</code>.</div>
+    </div>
+
+    <h2>Admin API</h2>
+    <p>All under <code>/api/v1/admin/**</code> require <code>ROLE_ADMIN</code> (via <code>X-Admin-Key</code> filter, or open when key unset in non-prod).</p>
+    <table>
+      <tr><th>Method</th><th>Path</th><th>Purpose</th></tr>
+      <tr><td>POST</td><td><code>/api/v1/admin/companies</code></td><td>Create company + API key (raw key once)</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/companies-overview</code></td><td>Companies overview for admin UI</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/data/overview</code></td><td>Table counts</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/data/companies|api-keys|devices|commands|audit-logs|google-callbacks|provider-configs|system-configs</code></td><td>Raw browser data</td></tr>
+      <tr><td>POST</td><td><code>/api/v1/admin/data/reset-business-data</code></td><td>Destructive reset helper</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/monitoring/dashboard?logLimit=40</code></td><td>Dashboard payload</td></tr>
+      <tr><td>GET</td><td><code>/api/v1/admin/monitoring/logs?limit=50</code></td><td>Recent audit logs</td></tr>
+    </table>
+    <h4>POST /api/v1/admin/companies body</h4>
+    <pre><code class="language-json">{
+  "name": "Acme Finance",
+  "code": "ACME",
+  "contactEmail": "ops@acme.test",
+  "apiKeyName": "Default Key"
+}</code></pre>
+    <pre><code class="language-json">{
+  "companyId": "…",
+  "companyCode": "ACME",
+  "apiKeyId": "…",
+  "apiKey": "sk_live_…",
+  "warning": "Store the apiKey now — it will not be shown again"
+}</code></pre>
+
+    <h2>Static / UI routes</h2>
+    <table>
+      <tr><th>Path</th><th>Behavior</th></tr>
+      <tr><td><code>/</code>, <code>/index.html</code></td><td>Public landing</td></tr>
+      <tr><td><code>/guide</code>, <code>/guide.html</code></td><td>Legacy guide (not this docs set)</td></tr>
+      <tr><td><code>/admin</code>, <code>/admin/data</code>, <code>/admin/monitor</code>, <code>/admin/companies</code></td><td>Forward to static admin HTML (public pages; APIs still need admin key)</td></tr>
+    </table>
+
+    <h2>Error reference</h2>
+    <p>Standard error object from <code>GlobalExceptionHandler</code>:</p>
+    <pre><code class="language-json">{
+  "timestamp": "2026-07-23T04:01:00Z",
+  "status": 404,
+  "error": "DEVICE_NOT_FOUND",
+  "message": "Device not found",
+  "path": "/api/v1/lock",
+  "correlationId": "…",
+  "details": null
+}</code></pre>
+    <table>
+      <tr><th>HTTP</th><th>error code</th><th>Meaning</th><th>Typical cause</th></tr>
+      <tr><td>400</td><td><code>VALIDATION_ERROR</code></td><td>Bean validation failed</td><td>Bad IMEI pattern, missing imei1, etc. <code>details</code> map of fields</td></tr>
+      <tr><td>400</td><td><code>LOCK_ID_REQUIRED</code></td><td>No usable identity</td><td>IMEI fallback disabled or neither lockId/imei</td></tr>
+      <tr><td>400</td><td><code>LOCK_ID_MISMATCH</code></td><td>imei ≠ device for lockId</td><td>Both supplied and inconsistent</td></tr>
+      <tr><td>401</td><td><code>UNAUTHORIZED</code></td><td>Auth failed</td><td>Missing/invalid API key, JWT, admin key, callback secret; inactive company; expired key</td></tr>
+      <tr><td>401</td><td><code>COMPANY_NOT_FOUND</code></td><td>Company missing</td><td>Principal company id not in DB</td></tr>
+      <tr><td>403</td><td><code>FORBIDDEN</code></td><td>Insufficient scope/role</td><td>Missing SCOPE_* or not ROLE_ADMIN</td></tr>
+      <tr><td>404</td><td><code>DEVICE_NOT_FOUND</code></td><td>Device missing</td><td>Wrong lockId/IMEI or other company</td></tr>
+      <tr><td>404</td><td><code>COMMAND_NOT_FOUND</code></td><td>Command missing</td><td>Wrong UUID or other company</td></tr>
+      <tr><td>409</td><td><code>DEVICE_EXISTS</code></td><td>Identifier conflict</td><td>Active device already holds identifier in company</td></tr>
+      <tr><td>409</td><td><code>DEVICE_NOT_COMMANDABLE</code></td><td>State rejects commands</td><td>SUSPENDED / DEACTIVATED / RETIRED</td></tr>
+      <tr><td>409</td><td><code>COMPANY_EXISTS</code></td><td>Admin create conflict</td><td>Duplicate company code</td></tr>
+      <tr><td>500</td><td><code>INTERNAL_ERROR</code></td><td>Unhandled exception</td><td>Unexpected server error</td></tr>
+      <tr><td>500</td><td><code>LOCK_ID_GENERATION_FAILED</code></td><td>Could not allocate lockId</td><td>8 ULID collisions (extremely rare)</td></tr>
+      <tr><td>501</td><td><code>GOOGLE_DLC_NOT_CONFIGURED</code></td><td>Real provider stub</td><td><code>provider.active=GOOGLE_DLC</code> without implementation</td></tr>
+    </table>
+    <p>Filter-level 401/403 JSON (not always <code>ApiError</code> shape): may omit <code>timestamp</code>/<code>path</code>/<code>correlationId</code>.</p>
+
+      </article>
+      <aside class="toc" id="toc"></aside>
+    </div>
+  </div>
+  <script src="assets/app.js"></script>
+</body>
+</html>
