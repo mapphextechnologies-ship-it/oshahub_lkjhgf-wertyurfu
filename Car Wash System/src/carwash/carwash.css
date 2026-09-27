@@ -501,3 +501,13 @@ html{min-height:100%;scroll-behavior:smooth;scrollbar-gutter:stable}body{overflo
 .cw-login-visual{justify-content:space-between}.cw-login-pitch{margin-top:auto}.cw-auth-form input::placeholder{color:#89948d;opacity:1}
 @media(max-width:900px){.cw-landing-nav nav{margin-left:0}.cw-landing-how .cw-landing-step-grid{margin-inline:auto}}
 @media(max-width:680px){.cw-workspace-preview{width:min(330px,88%)}.cw-landing-how .cw-landing-section-title{text-align:left}.cw-landing-how .cw-landing-step-grid{margin-left:0}.cw-landing-visual{background:#f7f9f6}}
+
+/* Keep the workspace card entirely within the light half of the hero. */
+.cw-landing-hero:after{width:40%}
+.cw-landing-video-stage{right:40%}
+.cw-landing-visual{width:40%;justify-items:end;padding-right:4%}
+.cw-workspace-preview{width:min(330px,88%);margin:0;justify-self:end}
+.cw-landing-how .cw-landing-section-title,.cw-landing-how .cw-landing-step-grid{text-align:left;margin-left:0}
+.cw-landing-account,.cw-primary,.cw-auth-switch{cursor:pointer}
+@media(max-width:900px){.cw-landing-hero:after{width:42%}.cw-landing-video-stage{right:42%}.cw-landing-visual{right:0;width:42%;padding-right:3%}}
+@media(max-width:680px){.cw-landing-hero:after{display:none}.cw-landing-video-stage{right:0}.cw-landing-visual{width:100%;padding-right:0}.cw-workspace-preview{justify-self:end;margin-right:2%}}
