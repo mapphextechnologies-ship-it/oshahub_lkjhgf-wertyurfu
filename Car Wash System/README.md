@@ -16,8 +16,9 @@ Open `http://localhost:5173`. Visitors see the public landing page first; the te
 1. Create a **new Supabase project for Carwash OS**. Do not reuse the Salama Lock project.
 2. Run `database/carwash.sql` in that project's SQL editor. This creates the tenant-scoped domain schema, RLS policies, transactional RPCs, business access requests and in-app account messages.
 3. In Supabase Auth, enable email/password sign-in and email confirmation. Configure the Site URL and redirect allow-list for local development and the OshaHub Vercel domain. Allow `/?invite=...` links with a matching domain path pattern. Configure SMTP before production so verification mail is reliably delivered.
-4. In Vercel, create a separate project rooted at this folder. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for Preview and Production. Set `VITE_CARWASH_DEMO_MODE=false`. Only the public anon/publishable key belongs in the browser. Never add a service-role key to a `VITE_` variable.
-5. Bootstrap the first platform admin from the Supabase SQL editor after creating that Auth user:
+4. For local development, copy `.env.example` to `.env.local`, then set `VITE_SUPABASE_URL` to the project URL and `VITE_SUPABASE_ANON_KEY` to the project's public anon/publishable key. Restart `npm run dev` after changing environment variables. The app shows a setup message listing missing or invalid configuration instead of crashing.
+5. In Vercel, create a separate project rooted at this folder. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for Preview and Production, then redeploy. Set `VITE_CARWASH_DEMO_MODE=false`. Only the public anon/publishable key belongs in the browser. Never add a service-role key to a `VITE_` variable.
+6. Bootstrap the first platform admin from the Supabase SQL editor after creating that Auth user:
 
 ```sql
 insert into public.carwash_memberships(user_id, tenant_id, role, full_name, status)

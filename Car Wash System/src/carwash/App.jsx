@@ -4,9 +4,9 @@ import {
   Bell, CalendarDays, CarFront, Check, CheckCircle2, ChevronDown, ChevronRight,
   CircleDollarSign, Clock3, CreditCard, Droplets, FileBarChart2, Gauge,
   Download, History, LayoutDashboard, Languages, LogOut, Menu, MoreHorizontal, Play, Plus, Search,
-  Settings, ShieldCheck, Sparkles, Store, UserRound, Users, Wallet, Waves, X, Zap
+  Settings, ShieldCheck, Sparkles, Store, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff
 } from 'lucide-react';
-import { supabaseBrowser } from '../services/supabaseBrowser.js';
+import { supabaseBrowser, supabaseConfigMessage } from '../services/supabaseBrowser.js';
 import {
   clearLegacyBrowserData, clearSession, demoUsers, formatKes, getSession, markUserSeen,
   newId, readDb, saveSession, todayLabel, wasUserSeen
@@ -300,19 +300,7 @@ function PublicInfoPage({page,onLogin,onRegister}){
 }
 
 const OSHAHUB_PRICES=[['Starter','KES 2,900','1 branch · 3 staff · Core operations'],['Growth','KES 4,900','3 branches · 15 staff · Reports and loyalty'],['Enterprise','KES 9,900','Unlimited branches · Priority support']];
-function downloadPricingPdf(){
-  const lines=['OSHAHUB PRICING GUIDE','Car wash operations subscription plans','','STARTER  -  KES 2,900 per month','1 branch · 3 staff · Core operations','','GROWTH  -  KES 4,900 per month','3 branches · 15 staff · Reports and loyalty','','ENTERPRISE  -  KES 9,900 per month','Unlimited branches · Priority support','','Quarterly, annual and custom terms are available on request.','Final billing terms are confirmed during onboarding.'];
-  const escape=(text)=>text.replace(/[\\()]/g,'\\$&');
-  const stream=['BT','/F1 22 Tf','72 760 Td',`(${escape(lines[0])}) Tj`,'/F1 11 Tf'];
-  lines.slice(1).forEach((line)=>stream.push('0 -28 Td',`(${escape(line)}) Tj`));stream.push('ET');
-  const content=stream.join('\n');const objects=[
-    '<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [4 0 R] /Count 1 >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>',
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
-  ];
-  let pdf='%PDF-1.4\n';const offsets=[0];objects.forEach((object,index)=>{offsets.push(new TextEncoder().encode(pdf).length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});const xref=new TextEncoder().encode(pdf).length;pdf+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.slice(1).map((offset)=>`${String(offset).padStart(10,'0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  const url=URL.createObjectURL(new Blob([pdf],{type:'application/pdf'}));const link=document.createElement('a');link.href=url;link.download='oshahub-pricing-guide.pdf';link.click();URL.revokeObjectURL(url);
-}
+function downloadPricingPdf(){window.print()}
 function PricingSheet(){return <section className="cw-pricing-sheet-page"><div className="cw-pricing-sheet-toolbar"><a href="#/pricing"><ArrowRight size={15}/> Back to pricing</a><button type="button" onClick={downloadPricingPdf}><Download size={17}/> Download PDF</button></div><article className="cw-pricing-sheet"><header><img src="/osha-hub-logo.svg" alt="OshaHub"/><div><h1>PRICING GUIDE</h1><p>Subscription plans for your car wash workspace.</p></div></header><h2>MONTHLY SUBSCRIPTION PLANS</h2><div className="cw-pricing-table"><table><thead><tr><th>Plan</th><th>Monthly price</th><th>What’s included</th></tr></thead><tbody>{OSHAHUB_PRICES.map(([plan,price,features])=><tr key={plan}><td>{plan}</td><td>{price}</td><td>{features}</td></tr>)}</tbody></table></div><div className="cw-pricing-sheet-notes"><section><h2>AVAILABLE TERMS</h2><p>Monthly, quarterly, annual and custom plans are available. The selected term is confirmed during onboarding.</p></section><section><h2>EVERY PLAN INCLUDES</h2><p>Business workspace, role-based access, wash queue, customer records and mobile-ready operations.</p></section></div></article></section>}
 
 function LoginScreen({onLogin,onBack,initialMode='login'}){
@@ -320,6 +308,9 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
   const [mode,setMode]=useState(()=>inviteToken?'register':initialMode);
   const [portal,setPortal]=useState('Business Admin');
   const [form,setForm]=useState({name:'',business:'',phone:'',email:'',password:''});
+  const [confirmPassword,setConfirmPassword]=useState('');
+  const [showPassword,setShowPassword]=useState(false);
+  const [showConfirmPassword,setShowConfirmPassword]=useState(false);
   const [loading,setLoading]=useState(false);
   const [message,setMessage]=useState('');
   const [error,setError]=useState('');
@@ -374,6 +365,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     try{
       if(!supabaseBrowser)throw new Error('Supabase is not configured yet. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the deployment environment.');
       if(mode==='register'){
+        if(form.password!==confirmPassword)throw new Error('Passwords do not match. Please check both password fields.');
         const staffInvite=inviteToken.length===64;
         const metadata=staffInvite?{full_name:form.name.trim(),invite_token:inviteToken}:{full_name:form.name.trim(),business_name:form.business.trim(),phone:form.phone.trim()};
         const callback=new URL(window.location.origin);if(staffInvite)callback.searchParams.set('invite',inviteToken);
@@ -401,10 +393,11 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
       <form className="cw-auth-form" onSubmit={submit}>
         {mode==='register'&&<><label>{inviteToken.length===64?'Employee’s full name':'Owner’s full name'}<input autoComplete="name" placeholder="Enter full name" required minLength="2" value={form.name} onChange={(e)=>set('name',e.target.value)}/></label>{inviteToken.length!==64&&<><label>Business name<input placeholder="Enter business name" required minLength="2" value={form.business} onChange={(e)=>set('business',e.target.value)}/></label><label>Phone number<input autoComplete="tel" inputMode="tel" placeholder="Enter phone number" required minLength="7" value={form.phone} onChange={(e)=>set('phone',e.target.value)}/></label></>}</>}
         <label>Email address<input type="email" autoComplete="email" placeholder="Enter email address" required value={form.email} onChange={(e)=>set('email',e.target.value)}/></label>
-        <label>Password<input type="password" autoComplete={mode==='login'?'current-password':'new-password'} placeholder="Enter password" required minLength="10" value={form.password} onChange={(e)=>set('password',e.target.value)}/></label>
+        <label>Password<div className="cw-password-wrap"><input type={showPassword?'text':'password'} autoComplete={mode==='login'?'current-password':'new-password'} placeholder="Enter password" required minLength="10" value={form.password} onChange={(e)=>set('password',e.target.value)}/><button type="button" className="cw-password-toggle" aria-label={showPassword?'Hide password':'Show password'} aria-pressed={showPassword} onClick={()=>setShowPassword((visible)=>!visible)}>{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>
+        {mode==='register'&&<label>Confirm password<div className="cw-password-wrap"><input type={showConfirmPassword?'text':'password'} autoComplete="new-password" placeholder="Re-enter password" required minLength="10" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)}/><button type="button" className="cw-password-toggle" aria-label={showConfirmPassword?'Hide confirmation password':'Show confirmation password'} aria-pressed={showConfirmPassword} onClick={()=>setShowConfirmPassword((visible)=>!visible)}>{showConfirmPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>}
         <button className="cw-primary cw-enter" type="submit" disabled={loading}>{loading?<><span className="cw-spinner"/>Connecting securely</>:mode==='register'?'Request business access':'Sign in securely'} <ArrowRight size={17}/></button>
       </form>
-      {!supabaseBrowser&&!demoEnabled&&<div className="cw-auth-alert" role="status">Secure sign-in is disabled until this project is connected to its own Supabase URL and public anon key.</div>}
+      {!supabaseBrowser&&!demoEnabled&&<div className="cw-auth-alert" role="status">Supabase is not ready yet. {supabaseConfigMessage}</div>}
       {error&&<div className="cw-auth-alert error" role="alert">{error}</div>}{message&&<div className="cw-auth-alert" role="status">{message}</div>}
       <button className="cw-auth-switch" onClick={()=>{setError('');setMessage('');setMode(mode==='login'?'register':'login')}}>{mode==='login'?<>New business? <b>Request access</b></>:<>Already registered? <b>Sign in</b></>}</button>
       {demoEnabled&&<details className="cw-demo-access"><summary>Explore sample workspace</summary><div className="cw-role-options">{demoUsers.map((item)=>{const Icon=item.role==='SaaS Super Admin'?Gauge:item.role==='Business Admin'?Store:item.role==='Receptionist'?Users:Waves;return <button type="button" key={item.role} className={`cw-role-option ${selected.role===item.role?'selected':''}`} onClick={()=>setSelected(item)}><span className="cw-role-icon"><Icon size={17}/></span><span><b>{item.role}</b><small>{item.email}</small></span><span className="cw-role-radio"/></button>})}</div><button type="button" className="cw-primary cw-enter" onClick={demoEnter} disabled={loading}>Enter sample workspace <ArrowRight size={17}/></button><div className="cw-demo-note"><ShieldCheck size={16}/><span><b>Demo data only</b><br/>Demo changes reset when you reload.</span></div></details>}

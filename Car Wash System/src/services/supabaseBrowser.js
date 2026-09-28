@@ -1,7 +1,27 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+const missingConfig = [
+  !supabaseUrl && 'VITE_SUPABASE_URL',
+  !supabaseAnonKey && 'VITE_SUPABASE_ANON_KEY',
+].filter(Boolean);
+let validSupabaseUrl = false;
+
+if (supabaseUrl) {
+  try {
+    const url = new URL(supabaseUrl);
+    validSupabaseUrl = (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) && Boolean(url.host);
+  } catch {
+    // Report configuration problems on the sign-in screen instead of crashing app startup.
+  }
+}
+
+export const supabaseConfigMessage = missingConfig.length
+  ? `Add ${missingConfig.join(' and ')} to your environment, then restart the dev server or redeploy.`
+  : !validSupabaseUrl
+    ? 'VITE_SUPABASE_URL must be a valid Supabase project URL (HTTPS, except localhost development).'
+    : '';
 
 function fetchWithTimeout(input, init = {}) {
   const controller = new AbortController();
@@ -16,7 +36,7 @@ function fetchWithTimeout(input, init = {}) {
 }
 
 export const supabaseBrowser =
-  supabaseUrl && supabaseAnonKey
+  !supabaseConfigMessage
     ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
           // Keep tokens in memory only. Reloading the portal requires a fresh sign-in.
