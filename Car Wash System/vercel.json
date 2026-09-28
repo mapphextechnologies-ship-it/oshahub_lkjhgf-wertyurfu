@@ -86,20 +86,5 @@
       ]
     }
   ],
-  "redirects": [],
-  "rewrites": [
-    {
-      "source": "/((?!api/|assets/|icons/|sw.js|robots.txt|sitemap.xml|google.*\\.html|workbox-.*\\.js|manifest(?:-[a-z]+)?\\.webmanifest).*)",
-      "destination": "/index.html"
-    }
-  ],
-  "builds": [
-    {
-      "config": {
-        "distDir": "dist"
-      },
-      "use": "@vercel/static-build",
-      "src": "package.json"
-    }
-  ]
+  "redirects": []
 }
