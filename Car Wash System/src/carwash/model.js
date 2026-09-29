@@ -66,11 +66,10 @@ export function markUserSeen(email) { seenUsers.add(email); }
 export function clearLegacyBrowserData() {
   try {
     const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).filter(Boolean);
-    const projectRef = import.meta.env?.VITE_SUPABASE_URL?.match(/^https?:\/\/([^.]+)/)?.[1];
     for (const key of keys) {
-      if (key.startsWith('carwash-os-') || (projectRef && key === `sb-${projectRef}-auth-token`)) localStorage.removeItem(key);
+      if (key.startsWith('carwash-os-')) localStorage.removeItem(key);
     }
-  } catch { /* Browser storage may be disabled; the app itself does not use it. */ }
+  } catch { /* Browser storage may be disabled; Supabase handles session persistence. */ }
 }
 export const demoUsers = [
   { role:'Business Admin', email:'admin@carwash.demo', name:'Peter Mwangi', tenant_id:'tenant-1' },

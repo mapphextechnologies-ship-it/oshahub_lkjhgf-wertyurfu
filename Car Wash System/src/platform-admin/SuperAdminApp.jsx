@@ -15,6 +15,25 @@ export default function SuperAdminApp() {
   const [password, setPassword] = useState('');
   const [search, setSearch] = useState('');
 
+  useEffect(() => {
+    if (!supabaseBrowser) return undefined;
+    let active = true;
+    supabaseBrowser.auth.getSession().then(async ({ data, error: sessionError }) => {
+      if (!active) return;
+      if (sessionError) { setError(sessionError.message); return; }
+      const user = data.session?.user;
+      if (!user) return;
+      const { data: memberships, error: membershipError } = await supabaseBrowser.from('carwash_memberships')
+        .select('id,role,tenant_id,full_name,status').eq('user_id', user.id).eq('role', 'SUPER_ADMIN').eq('status', 'ACTIVE').is('tenant_id', null).limit(1);
+      if (!active) return;
+      if (membershipError) { setError(membershipError.message); return; }
+      const membership = memberships?.[0];
+      if (membership) setSession({ user, membership });
+      else setError('This signed-in account does not have an active Super Admin membership.');
+    });
+    return () => { active = false; };
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!supabaseBrowser) return;
     setBusy(true);
@@ -45,7 +64,6 @@ export default function SuperAdminApp() {
       .select('id,role,tenant_id,full_name,status').eq('user_id', result.user.id).eq('role', 'SUPER_ADMIN').eq('status', 'ACTIVE').is('tenant_id', null).limit(1);
     const membership = memberships?.[0];
     if (membershipError || !membership) {
-      await supabaseBrowser.auth.signOut();
       setError(membershipError?.message || 'This account does not have an active Super Admin membership.');
       setBusy(false); return;
     }

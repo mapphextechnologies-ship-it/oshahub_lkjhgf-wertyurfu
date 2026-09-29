@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173` for the public OshaHub landing homepage. The Business and Team application is at `http://localhost:5173/business.html`; the isolated Super Admin portal is at `http://localhost:5173/super-admin.html`. Valid staff invitation links open the Business and Team app directly. Business Admins can create a time-limited staff invitation and open a prefilled WhatsApp message; the sender must tap **Send** in WhatsApp. Demo workspaces are disabled unless `VITE_CARWASH_DEMO_MODE=true` is explicitly set.
+Open `http://localhost:5173` for the public OshaHub landing homepage. The Business and Team application is at `http://localhost:5173/business.html`; the isolated Super Admin portal is at `http://localhost:5173/super-admin.html`. All three pages use the same Supabase project and shared Auth session on this origin. Valid staff invitation links open the Business and Team app directly. Business Admins can create a time-limited staff invitation and open a prefilled WhatsApp message; the sender must tap **Send** in WhatsApp. Demo workspaces are disabled unless `VITE_CARWASH_DEMO_MODE=true` is explicitly set.
 
 ## Supabase setup
 
@@ -46,7 +46,7 @@ The Vercel configuration builds the static OshaHub app from this project and ser
 
 ## Browser storage, abuse limits and scale
 
-The demo workspace is memory-only and is discarded on reload. Supabase sessions are also memory-only; users sign in again after a full reload. On startup the app removes only legacy `carwash-os-*` browser keys and the configured project's old Supabase auth token. It leaves other applications' browser storage untouched. This keeps business data out of browser local storage; production business data must come from Supabase.
+The demo workspace is memory-only and is discarded on reload. Supabase Auth sessions are persisted by the Supabase client so users stay signed in as they move between OshaHub pages. On startup the app removes only legacy `carwash-os-*` browser keys. It leaves other applications' browser storage untouched. Production business data must come from Supabase.
 
 The SQL applies per-user hourly limits to business requests (5), platform reviews (60), staff invitations (10), and invitation acceptance (10). The limiter is atomic in PostgreSQL and its counter table has RLS enabled with no client grants. Supabase Auth also enforces IP-based endpoint limits. Before public launch, enable Auth CAPTCHA/bot protection, review Authentication > Rate Limits and email-provider quotas, configure alerting, and deploy this SQL to the actual project. Those provider controls cannot be set from the browser bundle.
 

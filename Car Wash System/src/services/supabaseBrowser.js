@@ -39,8 +39,9 @@ export const supabaseBrowser =
   !supabaseConfigMessage
     ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-          // Keep tokens in memory only. Reloading the portal requires a fresh sign-in.
-          persistSession: false,
+          // All OshaHub entry pages use the same Supabase project and origin, so
+          // keep the Auth session available when users move between portals.
+          persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
       },

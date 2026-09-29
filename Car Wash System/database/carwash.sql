@@ -307,7 +307,7 @@ begin
       values(request_row.user_id,'ACCOUNT_REJECTED','Registration needs attention','Your business registration was not approved. Contact Carwash OS support if you need help.');
     insert into public.carwash_audit_logs(actor_user_id,action,entity_type,entity_id,details)
       values(auth.uid(),'BUSINESS_ACCOUNT_REJECTED','ACCESS_REQUEST',p_request::text,'{}'::jsonb);
-  end if;
+  end if; 
   return request_row;
 end;
 $$;
@@ -321,7 +321,7 @@ create unique index if not exists carwash_one_platform_membership_per_user
   on public.carwash_memberships(user_id) where tenant_id is null;
 
 create or replace function public.carwash_is_platform_admin()
-returns boolean language sql stable security definer set search_path=pg_catalog,public as $$
+returns boolean language sql stable security definer set search_path=pg_catalog,public as $$ 
   select exists(select 1 from public.carwash_memberships m where m.user_id=auth.uid() and m.role='SUPER_ADMIN' and m.status='ACTIVE' and m.tenant_id is null)
 $$;
 
