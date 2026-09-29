@@ -2,6 +2,9 @@
 -- Business rows always carry tenant_id. Membership is the source of tenant context.
 create extension if not exists pgcrypto;
 revoke create on schema public from public,anon,authenticated;
+-- Keep owner-run migrations able to create schema objects without granting
+-- CREATE to application roles.
+grant usage, create on schema public to postgres;
 
 create table if not exists public.carwash_tenants (
   id uuid primary key default gen_random_uuid(),
@@ -49,6 +52,19 @@ create table if not exists public.carwash_subscriptions (
   created_at timestamptz not null default now(),
   check (ends_at > starts_at)
 );
+
+create table if not exists public.carwash_subscription_payments (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.carwash_tenants(id) on delete restrict,
+  subscription_id uuid not null references public.carwash_subscriptions(id) on delete restrict,
+  plan_id uuid not null references public.carwash_plans(id) on delete restrict,
+  amount_kes numeric(12,2) not null check (amount_kes >= 0),
+  method text not null check (method in ('CASH','CARD','M-PESA','BANK TRANSFER')),
+  external_reference text,
+  confirmed_by uuid not null references auth.users(id),
+  paid_at timestamptz not null default now()
+);
+create index if not exists carwash_subscription_payments_time on public.carwash_subscription_payments(paid_at desc);
 
 create table if not exists public.carwash_customers (
   id uuid primary key default gen_random_uuid(),
@@ -370,7 +386,8 @@ begin
 end;
 $$;
 
-create or replace function public.carwash_activate_tenant_plan(target_tenant uuid,target_plan uuid)
+drop function if exists public.carwash_activate_tenant_plan(uuid,uuid);
+create or replace function public.carwash_activate_tenant_plan(target_tenant uuid,target_plan uuid,payment_method text default 'M-PESA',payment_reference text default null)
 returns public.carwash_subscriptions language plpgsql security definer set search_path=pg_catalog,public,pg_temp as $$
 declare plan_row public.carwash_plans%rowtype; tenant_row public.carwash_tenants%rowtype; subscription_row public.carwash_subscriptions%rowtype;
 begin
@@ -380,9 +397,12 @@ begin
   if not found then raise exception 'Business account not found.' using errcode='P0002'; end if;
   select * into plan_row from public.carwash_plans where id=target_plan and active;
   if not found then raise exception 'Choose an active subscription plan.' using errcode='22023'; end if;
+  if payment_method not in ('CASH','CARD','M-PESA','BANK TRANSFER') then raise exception 'Choose a supported business payment method.' using errcode='22023'; end if;
   insert into public.carwash_subscriptions(tenant_id,plan_id,starts_at,ends_at,status,auto_renew)
     values(target_tenant,target_plan,now(),now()+make_interval(days=>plan_row.duration_days),'ACTIVE',false)
     returning * into subscription_row;
+  insert into public.carwash_subscription_payments(tenant_id,subscription_id,plan_id,amount_kes,method,external_reference,confirmed_by)
+    values(target_tenant,subscription_row.id,target_plan,plan_row.price_kes,payment_method,nullif(trim(payment_reference),''),auth.uid());
   update public.carwash_tenants set status='ACTIVE' where id=target_tenant;
   insert into public.carwash_user_messages(user_id,kind,subject,body,reference_key)
     select m.user_id,'SYSTEM','Business plan activated',
@@ -673,6 +693,7 @@ alter table public.carwash_tenants enable row level security;
 alter table public.carwash_memberships enable row level security;
 alter table public.carwash_plans enable row level security;
 alter table public.carwash_subscriptions enable row level security;
+alter table public.carwash_subscription_payments enable row level security;
 alter table public.carwash_customers enable row level security;
 alter table public.carwash_vehicles enable row level security;
 alter table public.carwash_services enable row level security;
@@ -706,6 +727,10 @@ drop policy if exists cw_subscriptions_read on public.carwash_subscriptions;
 create policy cw_subscriptions_read on public.carwash_subscriptions for select using (public.carwash_is_platform_admin() or public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN']));
 drop policy if exists cw_subscriptions_admin_write on public.carwash_subscriptions;
 create policy cw_subscriptions_admin_write on public.carwash_subscriptions for all using (public.carwash_is_platform_admin()) with check (public.carwash_is_platform_admin());
+drop policy if exists cw_subscription_payments_read on public.carwash_subscription_payments;
+create policy cw_subscription_payments_read on public.carwash_subscription_payments for select using (public.carwash_is_platform_admin() or public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN']));
+revoke all on public.carwash_subscription_payments from public,anon,authenticated;
+grant select on public.carwash_subscription_payments to authenticated;
 drop policy if exists cw_customers_read on public.carwash_customers;
 create policy cw_customers_read on public.carwash_customers for select using (
   public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN','RECEPTIONIST'])
@@ -794,7 +819,7 @@ revoke all on function public.carwash_review_business_request(uuid,boolean) from
 revoke all on function public.carwash_create_staff_invite(uuid,text,text) from public, anon;
 revoke all on function public.carwash_accept_staff_invitation(text,text) from public, anon;
 revoke all on function public.carwash_delete_business_requests(uuid[]) from public, anon;
-revoke all on function public.carwash_activate_tenant_plan(uuid,uuid) from public, anon;
+revoke all on function public.carwash_activate_tenant_plan(uuid,uuid,text,text) from public, anon;
 revoke all on function public.carwash_notify_billing_status(uuid) from public, anon;
 revoke all on function public.carwash_update_platform_admin_name(text) from public, anon;
 revoke all on function public.carwash_update_tenant_settings(uuid,text,text,numeric) from public, anon;
@@ -815,7 +840,7 @@ grant execute on function public.carwash_review_business_request(uuid,boolean) t
 grant execute on function public.carwash_create_staff_invite(uuid,text,text) to authenticated;
 grant execute on function public.carwash_accept_staff_invitation(text,text) to authenticated;
 grant execute on function public.carwash_delete_business_requests(uuid[]) to authenticated;
-grant execute on function public.carwash_activate_tenant_plan(uuid,uuid) to authenticated;
+grant execute on function public.carwash_activate_tenant_plan(uuid,uuid,text,text) to authenticated;
 grant execute on function public.carwash_notify_billing_status(uuid) to authenticated;
 grant execute on function public.carwash_update_platform_admin_name(text) to authenticated;
 grant execute on function public.carwash_update_tenant_settings(uuid,text,text,numeric) to authenticated;
