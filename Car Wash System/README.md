@@ -15,6 +15,7 @@ Open `http://localhost:5173` for the public OshaHub landing homepage. The Busine
 
 1. Create a dedicated Supabase project for Carwash OS.
 2. Run `database/carwash.sql` in that project's SQL editor. This creates the tenant-scoped domain schema, RLS policies, transactional RPCs, business access requests and in-app account messages. Re-run it after platform changes so new billing, order, staff and settings RPCs are installed.
+   For an existing database missing the tenant settings column, run `database/migrations/20260929_tenant_settings.sql` in the SQL editor.
 3. In Supabase Auth, enable email/password sign-in and email confirmation. Configure the Site URL and redirect allow-list for local development and the OshaHub Vercel domain. Allow `/?invite=...` links with a matching domain path pattern. Configure SMTP before production so verification mail is reliably delivered.
 4. For local development, copy `.env.example` to `.env.local`, then set `VITE_SUPABASE_URL` and either `VITE_SUPABASE_PUBLISHABLE_KEY` (new key format) or `VITE_SUPABASE_ANON_KEY` (legacy anon key). Restart `npm run dev` after changing environment variables.
 5. In Vercel, configure the same URL and one public key variable for Preview and Production, then redeploy. Set `VITE_CARWASH_DEMO_MODE=false`. Only a public anon/publishable key belongs in the browser. Never add a service-role key to a `VITE_` variable.

@@ -9,8 +9,14 @@ export async function loadLiveWorkspace(user) {
   if (!tenantId) throw new Error('This account has no business workspace assigned.');
   const isWasher = user.role === 'Washer';
   const canSeeMoney = ['Business Admin', 'Receptionist'].includes(user.role);
-  const [tenantRes, staffRes, serviceRes, customerRes, vehicleRes, orderRes, orderServiceRes, paymentRes, commissionRes, loyaltyRes, auditRes] = await Promise.all([
-    supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status,settings').eq('id', tenantId).single(),
+  let tenantSettingsReady = true;
+  let tenantRes = await supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status,settings').eq('id', tenantId).single();
+  if (tenantRes.error && /settings/i.test(tenantRes.error.message || '')
+    && (['42703', 'PGRST204'].includes(tenantRes.error.code) || /does not exist|schema cache/i.test(tenantRes.error.message || ''))) {
+    tenantSettingsReady = false;
+    tenantRes = await supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status').eq('id', tenantId).single();
+  }
+  const [staffRes, serviceRes, customerRes, vehicleRes, orderRes, orderServiceRes, paymentRes, commissionRes, loyaltyRes, auditRes] = await Promise.all([
     supabaseBrowser.from('carwash_memberships').select('id,role,full_name,phone,branch,status,user_id').eq('tenant_id', tenantId),
     supabaseBrowser.from('carwash_services').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
     supabaseBrowser.from('carwash_customers').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
@@ -42,7 +48,7 @@ export async function loadLiveWorkspace(user) {
   for (const row of loyaltyRes.data) { const customer = customers.find((entry) => entry.id === row.customer_id); if (customer) customer.points = Number(row.balance_points); }
   const audit = auditRes.data.map((row) => ({ id: row.id, tenant_id: tenantId, action: row.action.replaceAll('_', ' ').toLowerCase(), detail: row.details?.order_id || row.entity_id || '', time: time(row.created_at) }));
   const settings = tenant.settings || {};
-  return { tenant, db: { activeTenantId: tenantId, tenants: [{ id: tenantId, name: tenant.name, owner: tenant.owner_name, plan: user.planName || 'Business', status: tenant.status, branches: 1 }], staff, services, customers, vehicles, jobs, payments, commissions, loyalty: [], audit, settings: { businessName: tenant.name, branch: settings.branch || user.branch || 'Main branch', currency: 'KES', loyaltyRate: Number(settings.loyaltyRate ?? 1) } } };
+  return { tenant, db: { activeTenantId: tenantId, tenants: [{ id: tenantId, name: tenant.name, owner: tenant.owner_name, plan: user.planName || 'Business', status: tenant.status, branches: 1 }], staff, services, customers, vehicles, jobs, payments, commissions, loyalty: [], audit, settingsSchemaReady: tenantSettingsReady, settings: { businessName: tenant.name, branch: settings.branch || user.branch || 'Main branch', currency: 'KES', loyaltyRate: Number(settings.loyaltyRate ?? 1) } } };
 }
 
 export function dbMethod(method = 'CASH') {
