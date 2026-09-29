@@ -42,7 +42,7 @@ export default function CarWashApp() {
   const [user, setUser] = useState(() => supabaseBrowser ? null : getSession());
   const inviteLink = new URLSearchParams(window.location.search).has('invite');
   const initialAuthRoute=window.location.hash.match(/^#\/(login|register|admin)(?:\?.*)?$/)?.[1];
-  const superAdminEntry=initialAuthRoute==='admin';
+  const superAdminEntry=initialAuthRoute==='admin'||(initialAuthRoute===undefined&&(window.location.hash===''||window.location.hash==='#/'));
   // Treat the deployment root as the staff/admin portal entry. Public marketing
   // pages remain available through the in-app back-to-home action.
   const [showLogin, setShowLogin] = useState(()=>inviteLink||Boolean(initialAuthRoute)||window.sessionStorage.getItem('cw-auth-view')==='login'||window.location.hash===''||window.location.hash==='#/');
@@ -411,6 +411,7 @@ function LoginScreen({onLogin,onBack,initialMode='login',superAdminEntry=false})
       {!supabaseBrowser&&!demoEnabled&&<div className="cw-auth-alert" role="status">Supabase is not ready yet. {supabaseConfigMessage}</div>}
       {error&&<div className="cw-auth-alert error" role="alert">{error}</div>}{message&&<div className="cw-auth-alert" role="status">{message}</div>}
       {!superAdminEntry&&<button className="cw-auth-switch" onClick={()=>{setError('');setMessage('');setMode(mode==='login'?'register':'login')}}>{mode==='login'?<>New business? <b>Request access</b></>:<>Already registered? <b>Sign in</b></>}</button>}
+      {superAdminEntry&&<a className="cw-auth-switch cw-admin-business-link" href="#/login">Business or staff? <b>Go to team sign in</b></a>}
       {demoEnabled&&!superAdminEntry&&<details className="cw-demo-access"><summary>Explore sample workspace</summary><div className="cw-role-options">{demoUsers.map((item)=>{const Icon=item.role==='SaaS Super Admin'?Gauge:item.role==='Business Admin'?Store:item.role==='Receptionist'?Users:Waves;return <button type="button" key={item.role} className={`cw-role-option ${selected.role===item.role?'selected':''}`} onClick={()=>setSelected(item)}><span className="cw-role-icon"><Icon size={17}/></span><span><b>{item.role}</b><small>{item.email}</small></span><span className="cw-role-radio"/></button>})}</div><button type="button" className="cw-primary cw-enter" onClick={demoEnter} disabled={loading}>Enter sample workspace <ArrowRight size={17}/></button><div className="cw-demo-note"><ShieldCheck size={16}/><span><b>Demo data only</b><br/>Demo changes reset when you reload.</span></div></details>}
     </div><div className="cw-login-foot">{superAdminEntry?'OshaHub platform administration · Authorized accounts only':'Email verification and account approval are handled by Supabase · Secure workspace access'}</div></div>
   </div>;
