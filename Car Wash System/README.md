@@ -14,7 +14,7 @@ Open `http://localhost:5173` for the public OshaHub landing homepage. The Busine
 ## Supabase setup
 
 1. Create a dedicated Supabase project for Carwash OS.
-2. Run `database/carwash.sql` in that project's SQL editor. This creates the tenant-scoped domain schema, RLS policies, transactional RPCs, business access requests and in-app account messages.
+2. Run `database/carwash.sql` in that project's SQL editor. This creates the tenant-scoped domain schema, RLS policies, transactional RPCs, business access requests and in-app account messages. Re-run it after platform changes so new billing, bulk-request and profile RPCs are installed.
 3. In Supabase Auth, enable email/password sign-in and email confirmation. Configure the Site URL and redirect allow-list for local development and the OshaHub Vercel domain. Allow `/?invite=...` links with a matching domain path pattern. Configure SMTP before production so verification mail is reliably delivered.
 4. For local development, copy `.env.example` to `.env.local`, then set `VITE_SUPABASE_URL` and either `VITE_SUPABASE_PUBLISHABLE_KEY` (new key format) or `VITE_SUPABASE_ANON_KEY` (legacy anon key). Restart `npm run dev` after changing environment variables.
 5. In Vercel, configure the same URL and one public key variable for Preview and Production, then redeploy. Set `VITE_CARWASH_DEMO_MODE=false`. Only a public anon/publishable key belongs in the browser. Never add a service-role key to a `VITE_` variable.
@@ -27,7 +27,7 @@ from auth.users u where email = 'admin@example.com'
   and not exists (select 1 from public.carwash_memberships m where m.user_id = u.id and m.tenant_id is null);
 ```
 
-Replace the email and name. Keep this bootstrap limited to the first administrator. Super Admins approve business requests in the Platform portal; approval creates the tenant and Business Admin membership atomically. Business Admins invite Receptionist and Washer accounts; the invited person verifies their email and accepts a single-use, 72-hour invitation. Applicants receive pending/activation/rejection messages in the app. Supabase Auth handles email verification. WhatsApp opens with a prefilled message, but the sender still presses **Send**. The app does not claim to send activation email or SMS; configure mail delivery separately if required.
+Replace the email and name. Keep this bootstrap limited to the first administrator. Super Admins can approve or re-approve business requests, bulk-clear requests, activate a plan after confirming payment, and edit their display name. Plan activation sends an in-app message. Expired subscriptions deny writes while preserving account sign-in and create an overdue notice for tenant members on their next sign-in. Business Admins invite Receptionist and Washer accounts; the invited person verifies their email and accepts a single-use, 72-hour invitation. Applicants receive pending/activation/rejection messages in the app. Supabase Auth handles email verification. WhatsApp opens with a prefilled message, but the sender still presses **Send**. The app does not claim to send activation email or SMS; configure mail delivery separately if required.
 
 ## Current integration boundary
 

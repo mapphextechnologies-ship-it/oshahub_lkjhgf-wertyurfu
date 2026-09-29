@@ -234,8 +234,9 @@ function SupabasePortalGate({user,onLogout}){
     setNotice('Invitation created. Open WhatsApp and tap Send to deliver the secure, one-time link.');
   }
   return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">{canReview?'PLATFORM CONTROL':'SECURE PORTAL'}</span><h1>{canReview?'Business access requests':`Welcome, ${user.name.split(' ')[0]}`}</h1><p>{canReview?'Review new business registrations. Approval creates the tenant and Business Admin membership in one database transaction.':`You’re signed in to the ${user.role} portal${user.tenant_name?` for ${user.tenant_name}`:''}. Account approval is active. The live wash operations workspace is not connected to this Supabase project yet.`}</p>
+  {user.billingRestricted&&<div className="cw-auth-alert error" role="alert"><b>Plan overdue. Workspace is restricted.</b><br/>{user.activationMessage||`Your plan for ${user.tenant_name||'this business'} is overdue. The account remains available in restricted mode. Please contact the platform administrator to confirm payment and reactivate the plan.`}</div>}
   {canReview&&<><div className="cw-gate-section-head"><b>Pending business requests</b><button onClick={refresh}>Refresh</button></div>{loading?<p>Loading requests…</p>:requests.length?<div className="cw-approval-list">{requests.map((request)=><article key={request.id}><div><b>{request.tenant_name}</b><span>{request.owner_name} · {request.phone}</span><small>{new Date(request.created_at).toLocaleDateString()}</small></div><div className="cw-approval-actions"><button onClick={()=>review(request.id,false)}>Decline</button><button onClick={()=>review(request.id,true)}>Approve</button></div></article>)}</div>:<p>No requests waiting for review.</p>}</>}
-  {user.role==='Business Admin'&&<section className="cw-invite-panel"><div className="cw-gate-section-head"><b>Invite a team member</b></div><p>Add an employee to the right portal. The invite link expires after 72 hours.</p><form onSubmit={createStaffInvite}><label>WhatsApp number<input type="tel" autoComplete="tel" required minLength="7" placeholder="+254 7xx xxx xxx" value={invitePhone} onChange={(e)=>setInvitePhone(e.target.value)}/></label><label>Portal<select value={inviteRole} onChange={(e)=>setInviteRole(e.target.value)}><option value="WASHER">Washer</option><option value="Receptionist">Receptionist</option></select></label><button className="cw-primary" type="submit">Create secure invitation</button></form>{whatsAppLink&&<a className="cw-whatsapp-link" href={whatsAppLink} target="_blank" rel="noreferrer">Open WhatsApp and send link <ArrowRight size={15}/></a>}</section>}
+  {user.role==='Business Admin'&&!user.billingRestricted&&<section className="cw-invite-panel"><div className="cw-gate-section-head"><b>Invite a team member</b></div><p>Add an employee to the right portal. The invite link expires after 72 hours.</p><form onSubmit={createStaffInvite}><label>WhatsApp number<input type="tel" autoComplete="tel" required minLength="7" placeholder="+254 7xx xxx xxx" value={invitePhone} onChange={(e)=>setInvitePhone(e.target.value)}/></label><label>Portal<select value={inviteRole} onChange={(e)=>setInviteRole(e.target.value)}><option value="WASHER">Washer</option><option value="Receptionist">Receptionist</option></select></label><button className="cw-primary" type="submit">Create secure invitation</button></form>{whatsAppLink&&<a className="cw-whatsapp-link" href={whatsAppLink} target="_blank" rel="noreferrer">Open WhatsApp and send link <ArrowRight size={15}/></a>}</section>}
   {!!notice&&<div className="cw-auth-alert" role="status">{notice}</div>}<button className="cw-primary cw-enter" onClick={onLogout}>Sign out</button></div></div>;
 }
 
@@ -362,11 +363,21 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     }
     const roleNames={BUSINESS_ADMIN:'Business Admin',RECEPTIONIST:'Receptionist',WASHER:'Washer'};
     const {data:tenant}=membership.tenant_id?await supabaseBrowser.from('carwash_tenants').select('name').eq('id',membership.tenant_id).maybeSingle():{data:null};
+    let billingRestricted=false;
+    if(membership.tenant_id){
+      const {data:canOperate,error:billingError}=await supabaseBrowser.rpc('carwash_can_operate',{target_tenant:membership.tenant_id});
+      if(billingError)throw billingError;
+      billingRestricted=canOperate===false;
+      if(billingRestricted){
+        const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});
+        if(noticeError)throw noticeError;
+      }
+    }
     const {data:messages}=await supabaseBrowser.from('carwash_user_messages').select('id,subject,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
     if(messages?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',messages[0].id);
     const role=roleNames[membership.role];
     if(!role)throw new Error('This account has no supported portal role. Contact your administrator.');
-    onLogin({id:authUser.id,authUserId:authUser.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,activationMessage:messages?.[0]?.body});
+    onLogin({id:authUser.id,authUserId:authUser.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,billingRestricted,activationMessage:messages?.[0]?.body});
   }
   async function submit(event){
     event.preventDefault();setError('');setMessage('');setLoading(true);

@@ -206,8 +206,12 @@ create table if not exists public.carwash_user_messages (
   subject text not null,
   body text not null,
   read_at timestamptz,
+  reference_key text,
   created_at timestamptz not null default now()
 );
+alter table public.carwash_user_messages add column if not exists reference_key text;
+create unique index if not exists carwash_user_messages_reference_unique
+  on public.carwash_user_messages(user_id,reference_key) where reference_key is not null;
 create table if not exists public.carwash_staff_invitations (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.carwash_tenants(id) on delete cascade,
@@ -242,7 +246,7 @@ returns boolean language plpgsql security definer set search_path=pg_catalog,pub
 declare actor_id uuid:=auth.uid(); bucket timestamptz; used_count integer;
 begin
   if actor_id is null then raise exception 'Sign in before continuing.' using errcode='42501'; end if;
-  if p_action not in ('BUSINESS_REQUEST','BUSINESS_REVIEW','STAFF_INVITE','STAFF_ACCEPT')
+  if p_action not in ('BUSINESS_REQUEST','BUSINESS_REVIEW','STAFF_INVITE','STAFF_ACCEPT','REQUEST_DELETE','PLAN_ACTIVATE','ADMIN_SETTINGS')
     or p_limit<1 or p_window_seconds<1 then raise exception 'Invalid rate limit.' using errcode='22023'; end if;
   bucket:=to_timestamp(floor(extract(epoch from clock_timestamp())/p_window_seconds)*p_window_seconds);
   insert into public.carwash_rpc_rate_limits(user_id,action,bucket_start,request_count)
@@ -289,7 +293,9 @@ begin
   perform public.carwash_consume_rate_limit('BUSINESS_REVIEW',60,3600);
   select * into request_row from public.carwash_access_requests where id=p_request for update;
   if not found then raise exception 'Registration request not found.' using errcode='P0002'; end if;
-  if request_row.status<>'PENDING' then raise exception 'This registration request was already reviewed.' using errcode='23514'; end if;
+  if request_row.status not in ('PENDING','REJECTED') or (not p_approve and request_row.status='REJECTED') then
+    raise exception 'This registration request cannot be reviewed from its current status.' using errcode='23514';
+  end if;
   if p_approve then
     select email into admin_email from auth.users where id=request_row.user_id;
     insert into public.carwash_tenants(name,owner_name,status)
@@ -297,14 +303,14 @@ begin
     insert into public.carwash_memberships(user_id,tenant_id,role,full_name,status)
       values(request_row.user_id,new_tenant,'BUSINESS_ADMIN',request_row.owner_name,'ACTIVE');
     update public.carwash_access_requests set status='APPROVED',reviewed_by=auth.uid(),reviewed_at=now() where id=p_request returning * into request_row;
-    insert into public.carwash_user_messages(user_id,kind,subject,body)
-      values(request_row.user_id,'ACCOUNT_APPROVED','Your account is active','Your business account has been approved. Sign in with '||coalesce(admin_email,'your registered email')||' to open your Carwash OS workspace.');
+    insert into public.carwash_user_messages(user_id,kind,subject,body,reference_key)
+      values(request_row.user_id,'ACCOUNT_APPROVED','Your account is active','Your business account has been approved. Sign in with '||coalesce(admin_email,'your registered email')||' to open your Carwash OS workspace.','BUSINESS_APPROVED:'||p_request::text||':'||clock_timestamp()::text);
     insert into public.carwash_audit_logs(tenant_id,actor_user_id,action,entity_type,entity_id,details)
       values(new_tenant,auth.uid(),'BUSINESS_ACCOUNT_APPROVED','ACCESS_REQUEST',p_request::text,jsonb_build_object('tenant_name',request_row.tenant_name));
   else
     update public.carwash_access_requests set status='REJECTED',reviewed_by=auth.uid(),reviewed_at=now() where id=p_request returning * into request_row;
-    insert into public.carwash_user_messages(user_id,kind,subject,body)
-      values(request_row.user_id,'ACCOUNT_REJECTED','Registration needs attention','Your business registration was not approved. Contact Carwash OS support if you need help.');
+    insert into public.carwash_user_messages(user_id,kind,subject,body,reference_key)
+      values(request_row.user_id,'ACCOUNT_REJECTED','Registration needs attention','Your business registration was not approved. Contact Carwash OS support if you need help.','BUSINESS_REJECTED:'||p_request::text||':'||clock_timestamp()::text);
     insert into public.carwash_audit_logs(actor_user_id,action,entity_type,entity_id,details)
       values(auth.uid(),'BUSINESS_ACCOUNT_REJECTED','ACCESS_REQUEST',p_request::text,'{}'::jsonb);
   end if; 
@@ -338,8 +344,90 @@ returns boolean language sql stable security definer set search_path=pg_catalog,
     select 1 from public.carwash_tenants t
     where t.id=target_tenant and t.status in ('TRIAL','ACTIVE','EXPIRING SOON')
       and (not exists(select 1 from public.carwash_subscriptions s where s.tenant_id=t.id)
-        or exists(select 1 from public.carwash_subscriptions s where s.tenant_id=t.id and s.status in ('TRIAL','ACTIVE','EXPIRING SOON') and (s.ends_at>=now() or s.grace_until>=now())))
+        or exists(
+          select 1 from public.carwash_subscriptions s
+          where s.id=(select latest.id from public.carwash_subscriptions latest where latest.tenant_id=t.id order by latest.starts_at desc,latest.created_at desc limit 1)
+            and s.status in ('TRIAL','ACTIVE','EXPIRING SOON')
+            and (s.ends_at>=now() or s.grace_until>=now())
+        ))
   )
+$$;
+
+create or replace function public.carwash_delete_business_requests(p_request_ids uuid[])
+returns integer language plpgsql security definer set search_path=pg_catalog,public,pg_temp as $$
+declare deleted_count integer;
+begin
+  if not public.carwash_is_platform_admin() then raise exception 'Platform administrator access is required.' using errcode='42501'; end if;
+  if coalesce(cardinality(p_request_ids),0)<1 or cardinality(p_request_ids)>250 then raise exception 'Select between 1 and 250 requests.' using errcode='22023'; end if;
+  perform public.carwash_consume_rate_limit('REQUEST_DELETE',30,3600);
+  delete from public.carwash_access_requests where id=any(p_request_ids) and status in ('PENDING','REJECTED');
+  get diagnostics deleted_count=row_count;
+  insert into public.carwash_audit_logs(actor_user_id,action,entity_type,details)
+    values(auth.uid(),'BUSINESS_REQUESTS_DELETED','ACCESS_REQUEST',jsonb_build_object('deleted_count',deleted_count));
+  return deleted_count;
+end;
+$$;
+
+create or replace function public.carwash_activate_tenant_plan(target_tenant uuid,target_plan uuid)
+returns public.carwash_subscriptions language plpgsql security definer set search_path=pg_catalog,public,pg_temp as $$
+declare plan_row public.carwash_plans%rowtype; tenant_row public.carwash_tenants%rowtype; subscription_row public.carwash_subscriptions%rowtype;
+begin
+  if not public.carwash_is_platform_admin() then raise exception 'Platform administrator access is required.' using errcode='42501'; end if;
+  perform public.carwash_consume_rate_limit('PLAN_ACTIVATE',60,3600);
+  select * into tenant_row from public.carwash_tenants where id=target_tenant for update;
+  if not found then raise exception 'Business account not found.' using errcode='P0002'; end if;
+  select * into plan_row from public.carwash_plans where id=target_plan and active;
+  if not found then raise exception 'Choose an active subscription plan.' using errcode='22023'; end if;
+  insert into public.carwash_subscriptions(tenant_id,plan_id,starts_at,ends_at,status,auto_renew)
+    values(target_tenant,target_plan,now(),now()+make_interval(days=>plan_row.duration_days),'ACTIVE',false)
+    returning * into subscription_row;
+  update public.carwash_tenants set status='ACTIVE' where id=target_tenant;
+  insert into public.carwash_user_messages(user_id,kind,subject,body,reference_key)
+    select m.user_id,'SYSTEM','Business plan activated',
+      'Your '||plan_row.name||' plan for '||tenant_row.name||' is active until '||to_char(subscription_row.ends_at at time zone 'Africa/Nairobi','DD Mon YYYY HH24:MI')||'.',
+      'PLAN_ACTIVATED:'||subscription_row.id::text
+    from public.carwash_memberships m where m.tenant_id=target_tenant and m.status='ACTIVE'
+    on conflict (user_id,reference_key) where reference_key is not null do nothing;
+  insert into public.carwash_audit_logs(tenant_id,actor_user_id,action,entity_type,entity_id,details)
+    values(target_tenant,auth.uid(),'TENANT_PLAN_ACTIVATED','SUBSCRIPTION',subscription_row.id::text,jsonb_build_object('plan_id',target_plan,'ends_at',subscription_row.ends_at));
+  return subscription_row;
+end;
+$$;
+
+create or replace function public.carwash_notify_billing_status(target_tenant uuid)
+returns boolean language plpgsql security definer set search_path=pg_catalog,public,pg_temp as $$
+declare tenant_row public.carwash_tenants%rowtype; subscription_row public.carwash_subscriptions%rowtype; plan_name text;
+begin
+  if not exists(select 1 from public.carwash_memberships m where m.user_id=auth.uid() and m.tenant_id=target_tenant and m.status='ACTIVE') then
+    raise exception 'Active business membership is required.' using errcode='42501';
+  end if;
+  select * into tenant_row from public.carwash_tenants where id=target_tenant;
+  select * into subscription_row from public.carwash_subscriptions s where s.tenant_id=target_tenant order by s.starts_at desc,s.created_at desc limit 1;
+  if not found or subscription_row.status='CANCELLED'
+    or subscription_row.ends_at>=now() or coalesce(subscription_row.grace_until>=now(),false) then return false; end if;
+  select name into plan_name from public.carwash_plans where id=subscription_row.plan_id;
+  insert into public.carwash_user_messages(user_id,kind,subject,body,reference_key)
+    select m.user_id,'SYSTEM','Business plan overdue',
+      'Your '||coalesce(plan_name,'business')||' plan for '||tenant_row.name||' expired on '||to_char(subscription_row.ends_at at time zone 'Africa/Nairobi','DD Mon YYYY')||'. Your account remains accessible in restricted, read-only mode. Please contact the platform administrator to confirm payment and reactivate your plan.',
+      'PLAN_OVERDUE:'||subscription_row.id::text
+    from public.carwash_memberships m where m.tenant_id=target_tenant and m.status='ACTIVE'
+    on conflict (user_id,reference_key) where reference_key is not null do nothing;
+  return true;
+end;
+$$;
+
+create or replace function public.carwash_update_platform_admin_name(p_full_name text)
+returns public.carwash_memberships language plpgsql security definer set search_path=pg_catalog,public,pg_temp as $$
+declare membership_row public.carwash_memberships%rowtype;
+begin
+  if not public.carwash_is_platform_admin() then raise exception 'Platform administrator access is required.' using errcode='42501'; end if;
+  perform public.carwash_consume_rate_limit('ADMIN_SETTINGS',20,3600);
+  if length(trim(coalesce(p_full_name,''))) not between 2 and 120 then raise exception 'Enter a name between 2 and 120 characters.' using errcode='22023'; end if;
+  update public.carwash_memberships set full_name=trim(p_full_name)
+    where user_id=auth.uid() and tenant_id is null and role='SUPER_ADMIN' and status='ACTIVE'
+    returning * into membership_row;
+  return membership_row;
+end;
 $$;
 
 create or replace function public.carwash_is_assigned_worker(target_order uuid, target_tenant uuid)
@@ -609,6 +697,10 @@ revoke all on function public.carwash_submit_business_request(text,text,text) fr
 revoke all on function public.carwash_review_business_request(uuid,boolean) from public, anon;
 revoke all on function public.carwash_create_staff_invite(uuid,text,text) from public, anon;
 revoke all on function public.carwash_accept_staff_invitation(text,text) from public, anon;
+revoke all on function public.carwash_delete_business_requests(uuid[]) from public, anon;
+revoke all on function public.carwash_activate_tenant_plan(uuid,uuid) from public, anon;
+revoke all on function public.carwash_notify_billing_status(uuid) from public, anon;
+revoke all on function public.carwash_update_platform_admin_name(text) from public, anon;
 revoke all on function public.carwash_consume_rate_limit(text,integer,integer) from public, anon, authenticated;
 
 grant execute on function public.carwash_is_platform_admin() to authenticated;
@@ -622,5 +714,9 @@ grant execute on function public.carwash_submit_business_request(text,text,text)
 grant execute on function public.carwash_review_business_request(uuid,boolean) to authenticated;
 grant execute on function public.carwash_create_staff_invite(uuid,text,text) to authenticated;
 grant execute on function public.carwash_accept_staff_invitation(text,text) to authenticated;
+grant execute on function public.carwash_delete_business_requests(uuid[]) to authenticated;
+grant execute on function public.carwash_activate_tenant_plan(uuid,uuid) to authenticated;
+grant execute on function public.carwash_notify_billing_status(uuid) to authenticated;
+grant execute on function public.carwash_update_platform_admin_name(text) to authenticated;
 
 -- Call carwash_transition_order from authenticated clients for atomic, role-checked transitions.
