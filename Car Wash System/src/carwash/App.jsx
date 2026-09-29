@@ -328,7 +328,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
   },[]);
   async function openWorkspace(authUser){
     // This app accepts only business and staff memberships. Platform admins
-    // authenticate through the standalone console at the site root.
+    // authenticate through the standalone console at /super-admin.html.
     let {data:membership,error:membershipError}=await supabaseBrowser.from('carwash_memberships')
       .select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE')
       .order('role',{ascending:true}).limit(10);
@@ -336,7 +336,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     const platformAdmin=(membership||[]).some((item)=>item.role==='SUPER_ADMIN');
     if(platformAdmin){
       await supabaseBrowser.auth.signOut();
-      setError('This is a platform administrator account. Sign in through the standalone Super Admin portal at the site root.');
+      setError('This is a platform administrator account. Sign in at /super-admin.html.');
       setBusy(false);
       return;
     }

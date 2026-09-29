@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173` for the standalone Super Admin portal. The separate Business and Team application is at `http://localhost:5173/business.html`; its public landing page links to staff sign-in and business registration. Valid staff invitation links open the Business and Team app directly. Business Admins can create a time-limited staff invitation and open a prefilled WhatsApp message; the sender must tap **Send** in WhatsApp. Demo workspaces are disabled unless `VITE_CARWASH_DEMO_MODE=true` is explicitly set.
+Open `http://localhost:5173` for the public OshaHub landing homepage. The Business and Team application is at `http://localhost:5173/business.html`; the isolated Super Admin portal is at `http://localhost:5173/super-admin.html`. Valid staff invitation links open the Business and Team app directly. Business Admins can create a time-limited staff invitation and open a prefilled WhatsApp message; the sender must tap **Send** in WhatsApp. Demo workspaces are disabled unless `VITE_CARWASH_DEMO_MODE=true` is explicitly set.
 
 ## Supabase setup
 
