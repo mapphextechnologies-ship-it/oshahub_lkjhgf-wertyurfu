@@ -9,7 +9,13 @@ export default defineConfig({
   ],
   build: {
     sourcemap: false,
-    minify: 'esbuild'
+    minify: 'esbuild',
+    rollupOptions: {
+      input: {
+        platformAdmin: fileURLToPath(new URL('./index.html', import.meta.url)),
+        business: fileURLToPath(new URL('./business.html', import.meta.url))
+      }
+    }
   },
   esbuild: {
     drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : []

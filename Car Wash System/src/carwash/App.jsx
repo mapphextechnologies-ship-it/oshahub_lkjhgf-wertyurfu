@@ -41,11 +41,8 @@ export default function CarWashApp() {
   const [db, setDb] = useState(readDb);
   const [user, setUser] = useState(() => supabaseBrowser ? null : getSession());
   const inviteLink = new URLSearchParams(window.location.search).has('invite');
-  const initialAuthRoute=window.location.hash.match(/^#\/(login|register|admin)(?:\?.*)?$/)?.[1];
-  const superAdminEntry=initialAuthRoute==='admin'||(initialAuthRoute===undefined&&(window.location.hash===''||window.location.hash==='#/'));
-  // Treat the deployment root as the staff/admin portal entry. Public marketing
-  // pages remain available through the in-app back-to-home action.
-  const [showLogin, setShowLogin] = useState(()=>inviteLink||Boolean(initialAuthRoute)||window.sessionStorage.getItem('cw-auth-view')==='login'||window.location.hash===''||window.location.hash==='#/');
+  const initialAuthRoute=window.location.hash.match(/^#\/(login|register)(?:\?.*)?$/)?.[1];
+  const [showLogin, setShowLogin] = useState(()=>inviteLink||Boolean(initialAuthRoute)||window.sessionStorage.getItem('cw-auth-view')==='login');
   const [authMode, setAuthMode] = useState(()=>inviteLink?'register':initialAuthRoute==='register'?'register':initialAuthRoute==='admin'||initialAuthRoute==='login'?'login':window.sessionStorage.getItem('cw-auth-mode')||'login');
   const [screen, setScreen] = useState(()=>window.sessionStorage.getItem('cw-workspace-screen')||'overview');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -170,7 +167,7 @@ export default function CarWashApp() {
   });
 
   if(!user&&!showLogin)return <PublicLandingPage onLogin={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','login');window.location.hash='/login';setAuthMode('login');setShowLogin(true)}} onRegister={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','register');window.location.hash='/register';setAuthMode('register');setShowLogin(true)}} />;
-  if(!user)return <LoginScreen initialMode={authMode} superAdminEntry={superAdminEntry} onLogin={login} onBack={()=>{window.sessionStorage.removeItem('cw-auth-view');window.sessionStorage.removeItem('cw-auth-mode');window.sessionStorage.removeItem('cw-auth-scroll');window.location.hash='/';window.scrollTo({top:0,behavior:'instant'});setShowLogin(false)}}/>;
+  if(!user)return <LoginScreen initialMode={authMode} onLogin={login} onBack={()=>{window.sessionStorage.removeItem('cw-auth-view');window.sessionStorage.removeItem('cw-auth-mode');window.sessionStorage.removeItem('cw-auth-scroll');window.location.hash='/';window.scrollTo({top:0,behavior:'instant'});setShowLogin(false)}}/>;
   if(user.authUserId)return <SupabasePortalGate user={user} onLogout={logout}/>;
 
   return <div className="cw-shell">
@@ -306,9 +303,9 @@ const OSHAHUB_PRICES=[['Starter','KES 2,900','1 branch · 3 staff · Core operat
 function downloadPricingPdf(){window.print()}
 function PricingSheet(){return <section className="cw-pricing-sheet-page"><div className="cw-pricing-sheet-toolbar"><a href="#/pricing"><ArrowRight size={15}/> Back to pricing</a><button type="button" onClick={downloadPricingPdf}><Download size={17}/> Download PDF</button></div><article className="cw-pricing-sheet"><header><img src="/osha-hub-logo.svg" alt="OshaHub"/><div><h1>PRICING GUIDE</h1><p>Subscription plans for your car wash workspace.</p></div></header><h2>MONTHLY SUBSCRIPTION PLANS</h2><div className="cw-pricing-table"><table><thead><tr><th>Plan</th><th>Monthly price</th><th>What’s included</th></tr></thead><tbody>{OSHAHUB_PRICES.map(([plan,price,features])=><tr key={plan}><td>{plan}</td><td>{price}</td><td>{features}</td></tr>)}</tbody></table></div><div className="cw-pricing-sheet-notes"><section><h2>AVAILABLE TERMS</h2><p>Monthly, quarterly, annual and custom plans are available. The selected term is confirmed during onboarding.</p></section><section><h2>EVERY PLAN INCLUDES</h2><p>Business workspace, role-based access, wash queue, customer records and mobile-ready operations.</p></section></div></article></section>}
 
-function LoginScreen({onLogin,onBack,initialMode='login',superAdminEntry=false}){
+function LoginScreen({onLogin,onBack,initialMode='login'}){
   const inviteToken=new URLSearchParams(window.location.search).get('invite')||'';
-  const [mode,setMode]=useState(()=>superAdminEntry?'login':inviteToken?'register':initialMode);
+  const [mode,setMode]=useState(()=>inviteToken?'register':initialMode);
   const [form,setForm]=useState({name:'',business:'',phone:'',email:'',password:''});
   const [confirmPassword,setConfirmPassword]=useState('');
   const [showPassword,setShowPassword]=useState(false);
@@ -330,28 +327,28 @@ function LoginScreen({onLogin,onBack,initialMode='login',superAdminEntry=false})
     return()=>{active=false;};
   },[]);
   async function openWorkspace(authUser){
-    // A user can have more than one active membership (for example, a platform
-    // administrator who also has a business workspace). Prefer the platform
-    // role, then choose one active business membership instead of failing with
-    // PostgREST's "multiple rows" error from maybeSingle().
+    // This app accepts only business and staff memberships. Platform admins
+    // authenticate through the standalone console at the site root.
     let {data:membership,error:membershipError}=await supabaseBrowser.from('carwash_memberships')
       .select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE')
       .order('role',{ascending:true}).limit(10);
     if(membershipError)throw membershipError;
-    membership=(membership||[]).find((item)=>item.role==='SUPER_ADMIN')||(membership||[])[0]||null;
+    const platformAdmin=(membership||[]).some((item)=>item.role==='SUPER_ADMIN');
+    if(platformAdmin){
+      await supabaseBrowser.auth.signOut();
+      setError('This is a platform administrator account. Sign in through the standalone Super Admin portal at the site root.');
+      setBusy(false);
+      return;
+    }
+    membership=(membership||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role))||null;
     if(!membership&&authUser.user_metadata?.invite_token){
       const accepted=await supabaseBrowser.rpc('carwash_accept_staff_invitation',{invite_token:authUser.user_metadata.invite_token,staff_name:authUser.user_metadata.full_name||authUser.email});
       if(accepted.error)throw accepted.error;
       const refreshed=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role',{ascending:true}).limit(10);
       if(refreshed.error)throw refreshed.error;
-      membership=(refreshed.data||[]).find((item)=>item.role==='SUPER_ADMIN')||(refreshed.data||[])[0]||null;
+      membership=(refreshed.data||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role))||null;
     }
     if(!membership){
-      if(superAdminEntry){
-        await supabaseBrowser.auth.signOut();
-        setError('This account is not assigned an active Super Admin membership.');
-        return;
-      }
       const meta=authUser.user_metadata||{};
       let {data:request}=await supabaseBrowser.from('carwash_access_requests').select('status').eq('user_id',authUser.id).maybeSingle();
       if(!request&&meta.business_name){
@@ -364,7 +361,7 @@ function LoginScreen({onLogin,onBack,initialMode='login',superAdminEntry=false})
       setMessage(inbox?.[0]?.body||(request?.status==='REJECTED'?'Your request needs attention. Please update your details and submit again.':'Your email is verified. Your account is waiting for administrator approval. We’ll post the activation update here.'));
       return;
     }
-    const roleNames={SUPER_ADMIN:'SaaS Super Admin',BUSINESS_ADMIN:'Business Admin',RECEPTIONIST:'Receptionist',WASHER:'Washer'};
+    const roleNames={BUSINESS_ADMIN:'Business Admin',RECEPTIONIST:'Receptionist',WASHER:'Washer'};
     const {data:tenant}=membership.tenant_id?await supabaseBrowser.from('carwash_tenants').select('name').eq('id',membership.tenant_id).maybeSingle():{data:null};
     const {data:messages}=await supabaseBrowser.from('carwash_user_messages').select('id,subject,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
     if(messages?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',messages[0].id);
@@ -375,7 +372,7 @@ function LoginScreen({onLogin,onBack,initialMode='login',superAdminEntry=false})
   async function submit(event){
     event.preventDefault();setError('');setMessage('');setLoading(true);
     try{
-      if(!supabaseBrowser)throw new Error('Supabase is not configured yet. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the deployment environment.');
+      if(!supabaseBrowser)throw new Error('Supabase is not configured yet. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY) in the deployment environment.');
       if(mode==='register'){
         if(form.password!==confirmPassword)throw new Error('Passwords do not match. Please check both password fields.');
         const staffInvite=inviteToken.length===64;
@@ -399,8 +396,8 @@ function LoginScreen({onLogin,onBack,initialMode='login',superAdminEntry=false})
   async function demoEnter(){setLoading(true);onLogin(selected);setLoading(false);}
   return <div className="cw-login">
     {loading&&<div className="cw-wash-loader"><div className="cw-loader-logo"><Droplets size={22}/><b>OSHA<i>HUB</i></b></div><h2>Connecting to your secure wash floor…</h2><p>Getting your workspace ready</p><div className="cw-loader-track"><i/></div></div>}
-    <div className={`cw-login-visual ${superAdminEntry?'cw-login-visual-admin':''}`}><div className="cw-login-nav"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span><ShieldCheck size={15}/> {superAdminEntry?'PLATFORM CONTROL':'SECURE OPERATIONS'}</span></div><div className="cw-login-pitch"><span>{superAdminEntry?'OSHAHUB · SUPER ADMINISTRATION':'OSHAHUB · CAR WASH OPERATIONS'}</span><h1>{superAdminEntry?<>One view of<br/>every business.</>:<>Every wash.<br/>Running smoothly.</>}</h1><p>{superAdminEntry?'Manage business access and platform operations from the owner control plane.':'Run your car wash with a clear view of jobs, people and payments, all in one place.'}</p><div className="cw-login-points"><div><Check size={15}/> {superAdminEntry?'Approve business registrations':'Live wash queue'}</div><div><Check size={15}/> {superAdminEntry?'Manage tenant accounts':'Customer loyalty'}</div><div><Check size={15}/> {superAdminEntry?'Control platform access':'Clear earnings'}</div></div>{!superAdminEntry&&<div className="cw-pitch-products"><div><small>CONNECTED PORTALS</small><b>Owner · Front desk · Wash team · Platform</b></div><div><small>SUBSCRIPTION PLANS</small><b>Monthly · Quarterly · Annual · Custom</b></div></div>}</div><div className="cw-login-legal">© 2026 OshaHub <span>{superAdminEntry?'Authorized platform administrators only.':'Made for the people who keep Kenya moving.'}</span></div></div>
-    <div className={`cw-login-panel ${superAdminEntry?'cw-login-panel-admin':''}`}><div className="cw-login-mobile-logo"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/></div><div className="cw-login-content">{onBack&&!superAdminEntry&&<button type="button" className="cw-back-to-site" onClick={onBack}>← Back to OshaHub</button>}<span className="cw-login-kicker">{superAdminEntry?'PLATFORM OWNER · RESTRICTED AREA':'WELCOME TO OSHAHUB'}</span><h2>{superAdminEntry?'Super Admin sign in':mode==='register'?'Bring your wash online.':'Your wash floor, at a glance.'}</h2><p className="cw-login-intro">{superAdminEntry?'Sign in with the platform owner account. Only an active SUPER_ADMIN membership can enter; business access requests are not accepted here.':mode==='register'?'Register your business and its owner. After review, the owner receives Business Admin access and can invite staff.':'Sign in with your account; your approved membership or staff invitation determines your workspace.'}</p>{!superAdminEntry&&<div className="cw-auth-mobile-products"><b>Business · Front desk · Wash team · Platform</b><span>Flexible monthly, quarterly, annual and custom subscriptions</span></div>}
+    <div className="cw-login-visual"><div className="cw-login-nav"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span><ShieldCheck size={15}/> SECURE OPERATIONS</span></div><div className="cw-login-pitch"><span>OSHAHUB · CAR WASH OPERATIONS</span><h1>Every wash.<br/>Running smoothly.</h1><p>Run your car wash with a clear view of jobs, people and payments, all in one place.</p><div className="cw-login-points"><div><Check size={15}/> Live wash queue</div><div><Check size={15}/> Customer loyalty</div><div><Check size={15}/> Clear earnings</div></div><div className="cw-pitch-products"><div><small>CONNECTED PORTALS</small><b>Owner · Front desk · Wash team</b></div><div><small>SUBSCRIPTION PLANS</small><b>Monthly · Quarterly · Annual · Custom</b></div></div></div><div className="cw-login-legal">© 2026 OshaHub <span>Made for the people who keep Kenya moving.</span></div></div>
+    <div className="cw-login-panel"><div className="cw-login-mobile-logo"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/></div><div className="cw-login-content">{onBack&&<button type="button" className="cw-back-to-site" onClick={onBack}>← Back to OshaHub</button>}<span className="cw-login-kicker">WELCOME TO OSHAHUB</span><h2>{mode==='register'?'Bring your wash online.':'Your wash floor, at a glance.'}</h2><p className="cw-login-intro">{mode==='register'?'Register your business and its owner. After review, the owner receives Business Admin access and can invite staff.':'Sign in with your business or staff account to open your workspace.'}</p><div className="cw-auth-mobile-products"><b>Business · Front desk · Wash team</b><span>Flexible monthly, quarterly, annual and custom subscriptions</span></div>
       <form className="cw-auth-form" onSubmit={submit}>
         {mode==='register'&&<><label>{inviteToken.length===64?'Employee’s full name':'Owner’s full name'}<input autoComplete="name" placeholder="Enter full name" required minLength="2" value={form.name} onChange={(e)=>set('name',e.target.value)}/></label>{inviteToken.length!==64&&<><label>Business name<input placeholder="Enter business name" required minLength="2" value={form.business} onChange={(e)=>set('business',e.target.value)}/></label><label>Phone number<input autoComplete="tel" inputMode="tel" placeholder="Enter phone number" required minLength="7" value={form.phone} onChange={(e)=>set('phone',e.target.value)}/></label></>}</>}
         <label>Email address<input type="email" autoComplete="email" placeholder="Enter email address" required value={form.email} onChange={(e)=>set('email',e.target.value)}/></label>
@@ -410,9 +407,9 @@ function LoginScreen({onLogin,onBack,initialMode='login',superAdminEntry=false})
       </form>
       {!supabaseBrowser&&!demoEnabled&&<div className="cw-auth-alert" role="status">Supabase is not ready yet. {supabaseConfigMessage}</div>}
       {error&&<div className="cw-auth-alert error" role="alert">{error}</div>}{message&&<div className="cw-auth-alert" role="status">{message}</div>}
-      {!superAdminEntry&&<button className="cw-auth-switch" onClick={()=>{setError('');setMessage('');setMode(mode==='login'?'register':'login')}}>{mode==='login'?<>New business? <b>Request access</b></>:<>Already registered? <b>Sign in</b></>}</button>}
-      {demoEnabled&&!superAdminEntry&&<details className="cw-demo-access"><summary>Explore sample workspace</summary><div className="cw-role-options">{demoUsers.map((item)=>{const Icon=item.role==='SaaS Super Admin'?Gauge:item.role==='Business Admin'?Store:item.role==='Receptionist'?Users:Waves;return <button type="button" key={item.role} className={`cw-role-option ${selected.role===item.role?'selected':''}`} onClick={()=>setSelected(item)}><span className="cw-role-icon"><Icon size={17}/></span><span><b>{item.role}</b><small>{item.email}</small></span><span className="cw-role-radio"/></button>})}</div><button type="button" className="cw-primary cw-enter" onClick={demoEnter} disabled={loading}>Enter sample workspace <ArrowRight size={17}/></button><div className="cw-demo-note"><ShieldCheck size={16}/><span><b>Demo data only</b><br/>Demo changes reset when you reload.</span></div></details>}
-    </div><div className="cw-login-foot">{superAdminEntry?'OshaHub platform administration · Authorized accounts only':'Email verification and account approval are handled by Supabase · Secure workspace access'}</div></div>
+      <button className="cw-auth-switch" onClick={()=>{setError('');setMessage('');setMode(mode==='login'?'register':'login')}}>{mode==='login'?<>New business? <b>Request access</b></>:<>Already registered? <b>Sign in</b></>}</button>
+      {demoEnabled&&<details className="cw-demo-access"><summary>Explore sample workspace</summary><div className="cw-role-options">{demoUsers.map((item)=>{const Icon=item.role==='Business Admin'?Store:item.role==='Receptionist'?Users:Waves;return <button type="button" key={item.role} className={`cw-role-option ${selected.role===item.role?'selected':''}`} onClick={()=>setSelected(item)}><span className="cw-role-icon"><Icon size={17}/></span><span><b>{item.role}</b><small>{item.email}</small></span><span className="cw-role-radio"/></button>})}</div><button type="button" className="cw-primary cw-enter" onClick={demoEnter} disabled={loading}>Enter sample workspace <ArrowRight size={17}/></button><div className="cw-demo-note"><ShieldCheck size={16}/><span><b>Demo data only</b><br/>Demo changes reset when you reload.</span></div></details>}
+    </div><div className="cw-login-foot">Email verification and account approval are handled by Supabase · Secure workspace access</div></div>
   </div>;
 }
 

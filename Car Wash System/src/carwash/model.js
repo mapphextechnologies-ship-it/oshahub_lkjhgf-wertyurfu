@@ -73,7 +73,6 @@ export function clearLegacyBrowserData() {
   } catch { /* Browser storage may be disabled; the app itself does not use it. */ }
 }
 export const demoUsers = [
-  { role:'SaaS Super Admin', email:'platform@carwash.demo', name:'Miriam Admin', tenant_id:null },
   { role:'Business Admin', email:'admin@carwash.demo', name:'Peter Mwangi', tenant_id:'tenant-1' },
   { role:'Receptionist', email:'reception@carwash.demo', name:'Faith Njeri', tenant_id:'tenant-1' },
   { role:'Washer', email:'washer@carwash.demo', name:'Kevin Otieno', tenant_id:'tenant-1' }

@@ -9,15 +9,15 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`. Visitors see the public landing page first; the team sign-in and business registration are reached from its actions. Valid staff invitation links go directly to invitation registration. The app has a role-aware secure sign-in for Business Admin, Receptionist, Washer and SaaS Super Admin accounts. A new business owner can request access; after approval, a Business Admin can create a time-limited staff invitation and open a prefilled WhatsApp message for the selected portal. The sender must tap **Send** in WhatsApp. Demo workspaces are disabled unless `VITE_CARWASH_DEMO_MODE=true` is explicitly set.
+Open `http://localhost:5173` for the standalone Super Admin portal. The separate Business and Team application is at `http://localhost:5173/business.html`; its public landing page links to staff sign-in and business registration. Valid staff invitation links open the Business and Team app directly. Business Admins can create a time-limited staff invitation and open a prefilled WhatsApp message; the sender must tap **Send** in WhatsApp. Demo workspaces are disabled unless `VITE_CARWASH_DEMO_MODE=true` is explicitly set.
 
 ## Supabase setup
 
 1. Create a dedicated Supabase project for Carwash OS.
 2. Run `database/carwash.sql` in that project's SQL editor. This creates the tenant-scoped domain schema, RLS policies, transactional RPCs, business access requests and in-app account messages.
 3. In Supabase Auth, enable email/password sign-in and email confirmation. Configure the Site URL and redirect allow-list for local development and the OshaHub Vercel domain. Allow `/?invite=...` links with a matching domain path pattern. Configure SMTP before production so verification mail is reliably delivered.
-4. For local development, copy `.env.example` to `.env.local`, then set `VITE_SUPABASE_URL` to the project URL and `VITE_SUPABASE_ANON_KEY` to the project's public anon/publishable key. Restart `npm run dev` after changing environment variables. The app shows a setup message listing missing or invalid configuration instead of crashing.
-5. In Vercel, create a separate project rooted at this folder. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for Preview and Production, then redeploy. Set `VITE_CARWASH_DEMO_MODE=false`. Only the public anon/publishable key belongs in the browser. Never add a service-role key to a `VITE_` variable.
+4. For local development, copy `.env.example` to `.env.local`, then set `VITE_SUPABASE_URL` and either `VITE_SUPABASE_PUBLISHABLE_KEY` (new key format) or `VITE_SUPABASE_ANON_KEY` (legacy anon key). Restart `npm run dev` after changing environment variables.
+5. In Vercel, configure the same URL and one public key variable for Preview and Production, then redeploy. Set `VITE_CARWASH_DEMO_MODE=false`. Only a public anon/publishable key belongs in the browser. Never add a service-role key to a `VITE_` variable.
 6. Bootstrap the first platform admin from the Supabase SQL editor after creating that Auth user:
 
 ```sql
@@ -37,7 +37,8 @@ The Vercel configuration builds the static OshaHub app from this project and ser
 
 ## Main folders
 
-- `src/carwash/` — Carwash OS interface and demo operations model.
+- `src/platform-admin/` — standalone platform Super Admin sign-in and console.
+- `src/carwash/` — Business and Team interface and demo operations model.
 - `database/carwash.sql` — Carwash OS-only PostgreSQL/Supabase schema.
 - `native-apps/washer/` — separate Expo washer app prototype.
 - `carwash-public/` — OshaHub logos, PWA manifest, service worker and install icons.
