@@ -32,6 +32,10 @@
 .cw-pitch-products b{color:#dce4de;font-size:10px}
 .cw-login-legal{color:#929a94;font-size:10px;letter-spacing:.2px}
 .cw-login-panel{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff;color:#151a16}
+.cw-login-panel-admin{background:linear-gradient(145deg,#fff 0%,#f5faf6 100%)}
+.cw-login-panel-admin .cw-login-kicker{display:inline-flex;align-items:center;padding:8px 11px;border:1px solid #cdebd7;border-radius:999px;background:#e9f8ee;color:#08783b;letter-spacing:1.15px}
+.cw-login-panel-admin .cw-login-content h2{font-size:clamp(32px,3.2vw,46px)}
+.cw-login-visual-admin{background:radial-gradient(circle at 18% 24%,rgba(53,225,116,.2),transparent 30%),linear-gradient(145deg,#06170e,#0c2115 58%,#06110b)}
 .cw-login-content{width:min(480px,100%);margin:auto;padding:40px 0}
 .cw-back-to-site{margin:0 0 52px;color:#68726b;font-size:11px;font-weight:700}
 .cw-login-kicker{color:#159447;font-size:10px;font-weight:800;letter-spacing:1px}
