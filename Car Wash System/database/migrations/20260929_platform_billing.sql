@@ -1,5 +1,9 @@
 -- Record plan payments confirmed by a platform administrator so billing totals
 -- reflect real confirmed transactions instead of estimates from active tenants.
+-- If the SQL editor session was temporarily switched to an application role,
+-- return to its original session role before applying owner-only DDL.
+reset role;
+
 -- carwash.sql revokes CREATE from PUBLIC; explicitly retain it for the
 -- Supabase database owner so future owner-run migrations can create objects.
 grant usage, create on schema public to postgres;
@@ -9,11 +13,20 @@ grant usage, create on schema public to postgres;
 do $$
 begin
   if not has_schema_privilege(current_user, 'public', 'CREATE') then
-    raise exception 'Role % cannot create objects in public. Re-run this migration as postgres or the public schema owner.', current_user
+    raise exception 'Role % (session role %) cannot create objects in public. Run this migration through Supabase Dashboard SQL Editor as postgres or connect as the public schema owner.', current_user, session_user
       using errcode = '42501';
   end if;
 end;
 $$;
+
+-- Seed the published OshaHub plans for projects whose plans table is empty.
+-- Existing plan prices and feature settings are preserved on reruns.
+insert into public.carwash_plans (name, price_kes, duration_days, feature_flags, active)
+values
+  ('Starter', 2900, 30, '{"branches":1,"staff":3,"description":"Core operations"}'::jsonb, true),
+  ('Growth', 4900, 30, '{"branches":3,"staff":15,"description":"Reports and loyalty"}'::jsonb, true),
+  ('Enterprise', 9900, 30, '{"branches":-1,"staff":-1,"description":"Priority support"}'::jsonb, true)
+on conflict (name) do nothing;
 
 create table if not exists public.carwash_subscription_payments (
   id uuid primary key default gen_random_uuid(),
