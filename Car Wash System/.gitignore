@@ -17,7 +17,7 @@ local-dev*.log
 dev-server*.log
 vercel-dev*.log
 
-# This is a separate Car Wash repository. Keep the copied Salama Lock source out of its GitHub project.
+# Keep unrelated legacy application source out of this car wash project.
 /api/
 /public/
 /tests/

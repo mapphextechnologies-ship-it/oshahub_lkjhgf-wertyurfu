@@ -8,7 +8,7 @@ OshaHub Carwash OS is a tenant-scoped car-wash SaaS. The web app is a single PWA
 - `src/services/supabaseBrowser.js` — public Supabase Auth/data client; only URL and anon key belong in browser configuration.
 - `database/carwash.sql` — tenant data, RLS, order/payment workflows, account requests, approval messages and administrative RPCs.
 - `public/` — OshaHub branding, PWA manifest, service worker and install icons.
-- Vercel — static SPA hosting; legacy Salama Lock API source is excluded from deployment output.
+- Vercel — static SPA hosting for this application.
 
 ## Trust boundaries
 

@@ -13,7 +13,7 @@ Open `http://localhost:5173`. Visitors see the public landing page first; the te
 
 ## Supabase setup
 
-1. Create a **new Supabase project for Carwash OS**. Do not reuse the Salama Lock project.
+1. Create a dedicated Supabase project for Carwash OS.
 2. Run `database/carwash.sql` in that project's SQL editor. This creates the tenant-scoped domain schema, RLS policies, transactional RPCs, business access requests and in-app account messages.
 3. In Supabase Auth, enable email/password sign-in and email confirmation. Configure the Site URL and redirect allow-list for local development and the OshaHub Vercel domain. Allow `/?invite=...` links with a matching domain path pattern. Configure SMTP before production so verification mail is reliably delivered.
 4. For local development, copy `.env.example` to `.env.local`, then set `VITE_SUPABASE_URL` to the project URL and `VITE_SUPABASE_ANON_KEY` to the project's public anon/publishable key. Restart `npm run dev` after changing environment variables. The app shows a setup message listing missing or invalid configuration instead of crashing.
@@ -33,7 +33,7 @@ Replace the email and name. Keep this bootstrap limited to the first administrat
 
 Supabase authentication, business registration requests, platform-admin approval, activation messages and the SQL access rules are connected in the code. The operational React dashboard is still a local demo data model. It is deliberately not presented as a live Supabase workspace after a real Supabase login; live customers, orders, payments, staff, reports, M-Pesa and washer-mobile synchronization still need repository/API integration before taking real business data or money. No Supabase or Vercel credentials were supplied, so a live database, email delivery and deployment cannot be verified from this checkout.
 
-The Vercel configuration builds only the static OshaHub app and excludes copied Salama Lock API routes and phone-monitoring jobs. It serves the allow-listed `carwash-public/` assets, including the OshaHub logo, favicon, manifest, service worker and phone install icons. Authenticated database operations require a network connection.
+The Vercel configuration builds the static OshaHub app from this project and serves only the `carwash-public/` assets, including the OshaHub logo, favicon, manifest, service worker and phone install icons. Authenticated database operations require a network connection.
 
 ## Main folders
 

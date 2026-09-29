@@ -41,9 +41,11 @@ export default function CarWashApp() {
   const [db, setDb] = useState(readDb);
   const [user, setUser] = useState(() => supabaseBrowser ? null : getSession());
   const inviteLink = new URLSearchParams(window.location.search).has('invite');
-  const initialAuthRoute=window.location.hash.match(/^#\/(login|register)(?:\?.*)?$/)?.[1];
-  const [showLogin, setShowLogin] = useState(()=>inviteLink||Boolean(initialAuthRoute)||window.sessionStorage.getItem('cw-auth-view')==='login');
-  const [authMode, setAuthMode] = useState(()=>inviteLink?'register':initialAuthRoute==='register'?'register':initialAuthRoute==='login'?'login':window.sessionStorage.getItem('cw-auth-mode')||'login');
+  const initialAuthRoute=window.location.hash.match(/^#\/(login|register|admin)(?:\?.*)?$/)?.[1];
+  // Treat the deployment root as the staff/admin portal entry. Public marketing
+  // pages remain available through the in-app back-to-home action.
+  const [showLogin, setShowLogin] = useState(()=>inviteLink||Boolean(initialAuthRoute)||window.sessionStorage.getItem('cw-auth-view')==='login'||window.location.hash===''||window.location.hash==='#/');
+  const [authMode, setAuthMode] = useState(()=>inviteLink?'register':initialAuthRoute==='register'?'register':initialAuthRoute==='admin'||initialAuthRoute==='login'?'login':window.sessionStorage.getItem('cw-auth-mode')||'login');
   const [screen, setScreen] = useState(()=>window.sessionStorage.getItem('cw-workspace-screen')||'overview');
   const [menuOpen, setMenuOpen] = useState(false);
   const [modal, setModal] = useState('');
@@ -306,7 +308,6 @@ function PricingSheet(){return <section className="cw-pricing-sheet-page"><div c
 function LoginScreen({onLogin,onBack,initialMode='login'}){
   const inviteToken=new URLSearchParams(window.location.search).get('invite')||'';
   const [mode,setMode]=useState(()=>inviteToken?'register':initialMode);
-  const [portal,setPortal]=useState('Business Admin');
   const [form,setForm]=useState({name:'',business:'',phone:'',email:'',password:''});
   const [confirmPassword,setConfirmPassword]=useState('');
   const [showPassword,setShowPassword]=useState(false);
@@ -328,15 +329,21 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     return()=>{active=false;};
   },[]);
   async function openWorkspace(authUser){
+    // A user can have more than one active membership (for example, a platform
+    // administrator who also has a business workspace). Prefer the platform
+    // role, then choose one active business membership instead of failing with
+    // PostgREST's "multiple rows" error from maybeSingle().
     let {data:membership,error:membershipError}=await supabaseBrowser.from('carwash_memberships')
-      .select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE').maybeSingle();
+      .select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE')
+      .order('role',{ascending:true}).limit(10);
     if(membershipError)throw membershipError;
+    membership=(membership||[]).find((item)=>item.role==='SUPER_ADMIN')||(membership||[])[0]||null;
     if(!membership&&authUser.user_metadata?.invite_token){
       const accepted=await supabaseBrowser.rpc('carwash_accept_staff_invitation',{invite_token:authUser.user_metadata.invite_token,staff_name:authUser.user_metadata.full_name||authUser.email});
       if(accepted.error)throw accepted.error;
-      const refreshed=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE').maybeSingle();
+      const refreshed=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role',{ascending:true}).limit(10);
       if(refreshed.error)throw refreshed.error;
-      membership=refreshed.data;
+      membership=(refreshed.data||[]).find((item)=>item.role==='SUPER_ADMIN')||(refreshed.data||[])[0]||null;
     }
     if(!membership){
       const meta=authUser.user_metadata||{};
@@ -357,7 +364,6 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     if(messages?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',messages[0].id);
     const role=roleNames[membership.role];
     if(!role)throw new Error('This account has no supported portal role. Contact your administrator.');
-    setPortal(role);
     onLogin({id:authUser.id,authUserId:authUser.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,activationMessage:messages?.[0]?.body});
   }
   async function submit(event){
@@ -388,8 +394,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
   return <div className="cw-login">
     {loading&&<div className="cw-wash-loader"><div className="cw-loader-logo"><Droplets size={22}/><b>OSHA<i>HUB</i></b></div><h2>Connecting to your secure wash floor…</h2><p>Getting your workspace ready</p><div className="cw-loader-track"><i/></div></div>}
     <div className="cw-login-visual"><div className="cw-login-nav"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span><ShieldCheck size={15}/> SECURE OPERATIONS</span></div><div className="cw-login-pitch"><span>OSHAHUB · CAR WASH OPERATIONS</span><h1>Every wash.<br/>Running smoothly.</h1><p>Run your car wash with a clear view of jobs, people and payments, all in one place.</p><div className="cw-login-points"><div><Check size={15}/> Live wash queue</div><div><Check size={15}/> Customer loyalty</div><div><Check size={15}/> Clear earnings</div></div><div className="cw-pitch-products"><div><small>CONNECTED PORTALS</small><b>Owner · Front desk · Wash team · Platform</b></div><div><small>SUBSCRIPTION PLANS</small><b>Monthly · Quarterly · Annual · Custom</b></div></div></div><div className="cw-login-legal">© 2026 OshaHub <span>Made for the people who keep Kenya moving.</span></div></div>
-    <div className="cw-login-panel"><div className="cw-login-mobile-logo"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/></div><div className="cw-login-content">{onBack&&<button type="button" className="cw-back-to-site" onClick={onBack}>← Back to OshaHub</button>}<span className="cw-login-kicker">WELCOME TO OSHAHUB</span><h2>{mode==='register'?'Bring your wash online.':'Your wash floor, at a glance.'}</h2><p className="cw-login-intro">{mode==='register'?'Create a business account request. We’ll verify your email before an administrator reviews activation.':'Sign in securely to the portal assigned to your account.'}</p><div className="cw-auth-mobile-products"><b>Business · Front desk · Wash team · Platform</b><span>Flexible monthly, quarterly, annual and custom subscriptions</span></div>
-      {supabaseBrowser&&<div className="cw-auth-tabs">{['Business Admin','Receptionist','Washer','SaaS Super Admin'].map((item)=><button type="button" key={item} className={portal===item?'active':''} onClick={()=>setPortal(item)}>{item==='SaaS Super Admin'?'Platform':item.replace('Business ','')}</button>)}</div>}
+    <div className="cw-login-panel"><div className="cw-login-mobile-logo"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/></div><div className="cw-login-content">{onBack&&<button type="button" className="cw-back-to-site" onClick={onBack}>← Back to OshaHub</button>}<span className="cw-login-kicker">WELCOME TO OSHAHUB</span><h2>{mode==='register'?'Bring your wash online.':'Your wash floor, at a glance.'}</h2><p className="cw-login-intro">{mode==='register'?'Register your business and its owner. After review, the owner receives Business Admin access and can invite staff.':'Sign in with your account; your approved membership or staff invitation determines your workspace.'}</p><div className="cw-auth-mobile-products"><b>Business · Front desk · Wash team · Platform</b><span>Flexible monthly, quarterly, annual and custom subscriptions</span></div>
       <form className="cw-auth-form" onSubmit={submit}>
         {mode==='register'&&<><label>{inviteToken.length===64?'Employee’s full name':'Owner’s full name'}<input autoComplete="name" placeholder="Enter full name" required minLength="2" value={form.name} onChange={(e)=>set('name',e.target.value)}/></label>{inviteToken.length!==64&&<><label>Business name<input placeholder="Enter business name" required minLength="2" value={form.business} onChange={(e)=>set('business',e.target.value)}/></label><label>Phone number<input autoComplete="tel" inputMode="tel" placeholder="Enter phone number" required minLength="7" value={form.phone} onChange={(e)=>set('phone',e.target.value)}/></label></>}</>}
         <label>Email address<input type="email" autoComplete="email" placeholder="Enter email address" required value={form.email} onChange={(e)=>set('email',e.target.value)}/></label>
