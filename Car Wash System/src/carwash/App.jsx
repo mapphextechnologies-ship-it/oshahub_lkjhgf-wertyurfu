@@ -47,6 +47,9 @@ export default function CarWashApp() {
   const [authMode, setAuthMode] = useState(()=>inviteLink?'register':initialAuthRoute==='register'?'register':initialAuthRoute==='admin'||initialAuthRoute==='login'?'login':window.sessionStorage.getItem('cw-auth-mode')||'login');
   const [screen, setScreen] = useState(()=>window.sessionStorage.getItem('cw-workspace-screen')||'overview');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
   const [modal, setModal] = useState('');
   const [toast, setToast] = useState('');
   const [query, setQuery] = useState('');
@@ -74,7 +77,6 @@ export default function CarWashApp() {
         if(canOperate===false){const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
         const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
         if(messageError)throw messageError;
-        if(messages?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',messages[0].id);
         if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch,billingRestricted:canOperate===false,activationMessage:messages?.[0]?.body};saveSession(session);setUser(session);}
       }catch(error){if(active){setShowLogin(true);setToast(error.message||'Unable to reconnect your workspace.');}}
     });
@@ -86,6 +88,15 @@ export default function CarWashApp() {
     loadLiveWorkspace(user).then(({db:liveDb})=>{if(active)setDb(liveDb);}).catch((error)=>{if(active)setLiveError(error?.message||'Unable to load this business workspace.');}).finally(()=>{if(active)setLiveLoading(false);});
     return()=>{active=false;};
   },[user?.authUserId,user?.tenant_id]);
+  useEffect(()=>{
+    if(!user?.authUserId)return;
+    let active=true;
+    const refresh=()=>supabaseBrowser.from('carwash_user_messages').select('id,kind,subject,body,read_at,created_at').eq('user_id',user.authUserId).order('created_at',{ascending:false}).limit(50)
+      .then(({data,error})=>{if(active&&!error)setNotifications(data||[]);});
+    refresh();
+    const timer=window.setInterval(refresh,30000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[user?.authUserId]);
   useEffect(()=>{ if(!toast)return; const id=setTimeout(()=>setToast(''),2700); return()=>clearTimeout(id); },[toast]);
   useEffect(()=>{
     if(!user)return;
@@ -257,7 +268,7 @@ export default function CarWashApp() {
   if(user.authUserId&&!user.tenant_id)return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">WORKSPACE ACCESS</span><h1>No business workspace assigned</h1><p>Ask the platform administrator to check your active membership.</p><button className="cw-primary" onClick={logout}>Sign out</button></div></div>;
 
   return <div className="cw-shell">
-    <aside className={`cw-sidebar ${menuOpen?'is-open':''}`}>
+    <aside className={`cw-sidebar ${menuOpen?'is-open':''} ${sidebarCollapsed?'is-collapsed':''}`}>
       <div className="cw-brand"><img src="/osha-hub-logo.svg" alt="OshaHub"/><button className="cw-icon-button cw-mobile-close" onClick={()=>setMenuOpen(false)} aria-label="Close menu"><X size={19}/></button></div>
       <div className="cw-workspace"><div className="cw-workspace-mark"><Store size={16}/></div><div className="cw-workspace-copy"><b>{role==='SaaS Super Admin'?'Platform owner':tenant?.name||db.settings.businessName}</b><span>{ROLE_COPY[role]}</span></div><ChevronDown size={15}/></div>
       <div className="cw-nav-label">WORKSPACE</div>
@@ -266,7 +277,7 @@ export default function CarWashApp() {
     </aside>
     {menuOpen&&<button className="cw-mobile-scrim" onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
     <main className="cw-main">
-      <header className="cw-topbar"><button className="cw-icon-button cw-mobile-menu" onClick={()=>setMenuOpen(true)} aria-label="Open menu"><Menu size={21}/></button><div className="cw-crumb"><span>{role==='SaaS Super Admin'?'Platform':tenant?.name}</span><ChevronRight size={14}/><b>{NAV_TITLES[screen]||'My profile'}</b></div><div className="cw-top-actions"><span className="cw-date"><CalendarDays size={15}/>{todayLabel()}</span><button className="cw-icon-button cw-notification" onClick={()=>notify('You’re all caught up.')} aria-label="Notifications"><Bell size={18}/></button><div className="cw-top-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div></header>
+      <header className="cw-topbar"><button className="cw-icon-button cw-sidebar-toggle" onClick={()=>{if(window.matchMedia('(max-width: 980px)').matches)setMenuOpen((open)=>!open);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={sidebarCollapsed?'Expand menu':'Toggle menu'} aria-expanded={menuOpen||!sidebarCollapsed}><Menu size={20}/></button><div className="cw-crumb"><span>{role==='SaaS Super Admin'?'Platform':tenant?.name}</span><ChevronRight size={14}/><b>{NAV_TITLES[screen]||'My profile'}</b></div><div className="cw-top-actions"><span className="cw-date"><CalendarDays size={15}/>{todayLabel()}</span><div className="cw-notification-wrap"><button className="cw-icon-button cw-notification" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications" aria-expanded={notificationsOpen}><Bell size={18}/>{(notifications.some((item)=>!item.read_at)||scopedJobs.some((job)=>job.paymentStatus!=='PAID'))&&<i/>}</button>{notificationsOpen&&<div className="cw-notification-panel"><div className="cw-notification-head"><b>Notification center</b><button onClick={()=>{const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('user_id',user.authUserId).is('read_at',null).then(()=>setNotifications((old)=>old.map((item)=>({...item,read_at:item.read_at||now}))));}}>Mark all read</button></div>{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length>0&&<button className="cw-notification-item unpaid" onClick={()=>{navigate('payments');setNotificationsOpen(false);}}><b>{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length} unpaid wash order{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length===1?'':'s'}</b><span>Payments are still due at the front desk.</span><small>Open payments <ArrowRight size={12}/></small></button>}{notifications.map((item)=><button key={item.id} className={`cw-notification-item ${item.read_at?'':'unread'}`} onClick={()=>{if(!item.read_at){const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('id',item.id).then(()=>setNotifications((old)=>old.map((entry)=>entry.id===item.id?{...entry,read_at:now}:entry)));}}}><b>{item.subject}</b><span>{item.body}</span><small>{new Date(item.created_at).toLocaleString('en-KE')}</small></button>)}{!notifications.length&&!scopedJobs.some((job)=>job.paymentStatus!=='PAID')&&<p className="cw-notification-empty">You’re all caught up.</p>}</div>}</div><div className="cw-top-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div></header>
       <section className="cw-page">
         {liveError&&<div className="cw-auth-alert error" role="alert">{liveError}</div>}
         {user.billingRestricted&&<div className="cw-auth-alert error" role="alert"><b>Plan overdue. Your workspace is restricted.</b><br/>{user.activationMessage||'Contact the platform administrator to confirm payment and reactivate the plan.'}</div>}
@@ -410,7 +421,6 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
         request=result.data;
       }
       const {data:inbox}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
-      if(inbox?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',inbox[0].id);
       setMessage(inbox?.[0]?.body||(request?.status==='REJECTED'?'Your request needs attention. Please update your details and submit again.':'Your email is verified. Your account is waiting for administrator approval. We’ll post the activation update here.'));
       return;
     }
@@ -427,7 +437,6 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
       }
     }
     const {data:messages}=await supabaseBrowser.from('carwash_user_messages').select('id,subject,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
-    if(messages?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',messages[0].id);
     const role=roleNames[membership.role];
     if(!role)throw new Error('This account has no supported portal role. Contact your administrator.');
     onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:messages?.[0]?.body});
