@@ -8,8 +8,10 @@ create table if not exists public.carwash_tenants (
   name text not null,
   owner_name text not null,
   status text not null default 'TRIAL' check (status in ('TRIAL','ACTIVE','EXPIRING SOON','EXPIRED','SUSPENDED','CANCELLED')),
+  settings jsonb not null default '{"branch":"Main branch","loyaltyRate":1}'::jsonb,
   created_at timestamptz not null default now()
 );
+alter table public.carwash_tenants add column if not exists settings jsonb not null default '{"branch":"Main branch","loyaltyRate":1}'::jsonb;
 
 create table if not exists public.carwash_memberships (
   id uuid primary key default gen_random_uuid(),
@@ -430,6 +432,24 @@ begin
 end;
 $$;
 
+create or replace function public.carwash_update_tenant_settings(target_tenant uuid,p_business_name text,p_branch text,p_loyalty_rate numeric)
+returns public.carwash_tenants language plpgsql security definer set search_path=pg_catalog,public,pg_temp as $$
+declare actor public.carwash_memberships%rowtype; tenant_row public.carwash_tenants%rowtype;
+begin
+  select * into actor from public.carwash_memberships where user_id=auth.uid() and tenant_id=target_tenant and role='BUSINESS_ADMIN' and status='ACTIVE' limit 1;
+  if not found or not public.carwash_can_operate(target_tenant) then raise exception 'Active business administrator access is required.' using errcode='42501'; end if;
+  if length(trim(coalesce(p_business_name,''))) not between 2 and 120 or length(trim(coalesce(p_branch,''))) not between 2 and 120 or p_loyalty_rate<0 or p_loyalty_rate>100 then
+    raise exception 'Enter a valid business name, branch and loyalty rate.' using errcode='22023';
+  end if;
+  perform public.carwash_consume_rate_limit('ADMIN_SETTINGS',20,3600);
+  update public.carwash_tenants set name=trim(p_business_name),settings=jsonb_build_object('branch',trim(p_branch),'loyaltyRate',p_loyalty_rate)
+    where id=target_tenant returning * into tenant_row;
+  insert into public.carwash_audit_logs(tenant_id,actor_user_id,action,entity_type,entity_id,details)
+    values(target_tenant,auth.uid(),'TENANT_SETTINGS_UPDATED','TENANT',target_tenant::text,tenant_row.settings);
+  return tenant_row;
+end;
+$$;
+
 create or replace function public.carwash_is_assigned_worker(target_order uuid, target_tenant uuid)
 returns boolean language sql stable security definer set search_path=pg_catalog,public as $$
   select exists(select 1 from public.carwash_orders o join public.carwash_memberships m on m.id=o.washer_membership_id where o.id=target_order and o.tenant_id=target_tenant and m.user_id=auth.uid() and m.role='WASHER' and m.status='ACTIVE')
@@ -484,6 +504,7 @@ declare
   actor public.carwash_memberships%rowtype;
   is_allowed boolean := false;
   previous_state text;
+  loyalty_points bigint;
 begin
   select * into current_order from public.carwash_orders where id=target_order for update;
   if not found then raise exception 'Wash order not found.' using errcode='P0002'; end if;
@@ -521,16 +542,88 @@ begin
     from public.carwash_order_services os where os.order_id=current_order.id and os.tenant_id=current_order.tenant_id
     on conflict(order_service_id) do nothing;
   elsif target_state='CLOSED' then
+    select floor(current_order.subtotal_kes*coalesce((t.settings->>'loyaltyRate')::numeric,1))::bigint into loyalty_points
+      from public.carwash_tenants t where t.id=current_order.tenant_id;
     insert into public.carwash_loyalty_accounts(tenant_id,customer_id,balance_points)
-    values(current_order.tenant_id,current_order.customer_id,floor(current_order.subtotal_kes)::bigint)
+    values(current_order.tenant_id,current_order.customer_id,loyalty_points)
     on conflict(tenant_id,customer_id) do update set balance_points=public.carwash_loyalty_accounts.balance_points+excluded.balance_points;
     insert into public.carwash_loyalty_ledger(tenant_id,customer_id,order_id,points,event_type)
-    values(current_order.tenant_id,current_order.customer_id,current_order.id,floor(current_order.subtotal_kes)::bigint,'EARN');
+    values(current_order.tenant_id,current_order.customer_id,current_order.id,loyalty_points,'EARN');
   end if;
 
   insert into public.carwash_audit_logs(tenant_id,actor_user_id,action,entity_type,entity_id,details)
   values(current_order.tenant_id,auth.uid(),'ORDER_'||replace(target_state,' ','_'),'WASH_ORDER',current_order.id::text,jsonb_build_object('from',previous_state,'to',target_state));
   return current_order;
+end;
+$$;
+
+create or replace function public.carwash_assign_order(target_order uuid,target_washer uuid default null)
+returns public.carwash_orders language plpgsql security definer set search_path=pg_catalog,public as $$
+declare current_order public.carwash_orders%rowtype; actor public.carwash_memberships%rowtype;
+begin
+  select * into current_order from public.carwash_orders where id=target_order for update;
+  if not found then raise exception 'Wash order not found.' using errcode='P0002'; end if;
+  select * into actor from public.carwash_memberships where user_id=auth.uid() and tenant_id=current_order.tenant_id and role in ('BUSINESS_ADMIN','RECEPTIONIST') and status='ACTIVE' limit 1;
+  if not found or not public.carwash_can_operate(current_order.tenant_id) then raise exception 'Active front desk access is required.' using errcode='42501'; end if;
+  if current_order.status<>'WAITING' then raise exception 'Only waiting orders can be assigned.' using errcode='23514'; end if;
+  if target_washer is null then
+    select w.id into target_washer from public.carwash_memberships w
+    where w.tenant_id=current_order.tenant_id and w.role='WASHER' and w.status='ACTIVE'
+    order by (select count(*) from public.carwash_orders o where o.washer_membership_id=w.id and o.status in ('ASSIGNED','IN PROGRESS')) asc,w.created_at asc limit 1;
+  end if;
+  if target_washer is null or not exists(select 1 from public.carwash_memberships where id=target_washer and tenant_id=current_order.tenant_id and role='WASHER' and status='ACTIVE') then
+    raise exception 'Choose an active washer from this business.' using errcode='22023';
+  end if;
+  update public.carwash_orders set washer_membership_id=target_washer,status='ASSIGNED' where id=target_order returning * into current_order;
+  insert into public.carwash_audit_logs(tenant_id,actor_user_id,action,entity_type,entity_id,details)
+    values(current_order.tenant_id,auth.uid(),'ORDER_ASSIGNED','WASH_ORDER',current_order.id::text,jsonb_build_object('washer_membership_id',target_washer));
+  return current_order;
+end;
+$$;
+
+create or replace function public.carwash_create_order(target_tenant uuid,target_customer uuid,target_vehicle uuid,target_services uuid[],target_washer uuid default null)
+returns public.carwash_orders language plpgsql security definer set search_path=pg_catalog,public as $$
+declare actor public.carwash_memberships%rowtype; created_order public.carwash_orders%rowtype; service_count integer;
+begin
+  select * into actor from public.carwash_memberships where user_id=auth.uid() and tenant_id=target_tenant and role in ('BUSINESS_ADMIN','RECEPTIONIST') and status='ACTIVE' limit 1;
+  if not found or not public.carwash_can_operate(target_tenant) then raise exception 'Active front desk access is required.' using errcode='42501'; end if;
+  if coalesce(cardinality(target_services),0)<1 or cardinality(target_services)>30 then raise exception 'Choose between 1 and 30 services.' using errcode='22023'; end if;
+  if not exists(select 1 from public.carwash_customers where id=target_customer and tenant_id=target_tenant)
+    or not exists(select 1 from public.carwash_vehicles where id=target_vehicle and customer_id=target_customer and tenant_id=target_tenant) then
+    raise exception 'Choose a vehicle and customer from this business.' using errcode='22023';
+  end if;
+  select count(*) into service_count from public.carwash_services where tenant_id=target_tenant and id=any(target_services) and active;
+  if service_count<>cardinality(target_services) then raise exception 'A selected wash service is no longer available.' using errcode='22023'; end if;
+  if target_washer is not null and not exists(select 1 from public.carwash_memberships where id=target_washer and tenant_id=target_tenant and role='WASHER' and status='ACTIVE') then
+    raise exception 'Choose an active washer from this business.' using errcode='22023';
+  end if;
+  insert into public.carwash_orders(tenant_id,customer_id,vehicle_id,washer_membership_id,status,payment_status,subtotal_kes,created_by)
+  select target_tenant,target_customer,target_vehicle,target_washer,case when target_washer is null then 'WAITING' else 'ASSIGNED' end,'UNPAID',sum(s.price_kes),auth.uid()
+    from public.carwash_services s where s.tenant_id=target_tenant and s.id=any(target_services)
+    returning * into created_order;
+  insert into public.carwash_order_services(tenant_id,order_id,service_id,service_name_snapshot,price_kes_snapshot,commission_kes_snapshot,rule_version)
+    select target_tenant,created_order.id,s.id,s.name,s.price_kes,s.commission_kes,'v1'
+    from public.carwash_services s where s.tenant_id=target_tenant and s.id=any(target_services);
+  insert into public.carwash_audit_logs(tenant_id,actor_user_id,action,entity_type,entity_id,details)
+    values(target_tenant,auth.uid(),'ORDER_CREATED','WASH_ORDER',created_order.id::text,jsonb_build_object('subtotal_kes',created_order.subtotal_kes));
+  return created_order;
+end;
+$$;
+
+create or replace function public.carwash_update_staff_status(target_membership uuid,next_status text)
+returns public.carwash_memberships language plpgsql security definer set search_path=pg_catalog,public as $$
+declare staff_row public.carwash_memberships%rowtype; actor public.carwash_memberships%rowtype;
+begin
+  if next_status not in ('ACTIVE','SUSPENDED') then raise exception 'Choose a valid team status.' using errcode='22023'; end if;
+  select * into staff_row from public.carwash_memberships where id=target_membership for update;
+  if not found then raise exception 'Team member not found.' using errcode='P0002'; end if;
+  select * into actor from public.carwash_memberships where user_id=auth.uid() and tenant_id=staff_row.tenant_id and role='BUSINESS_ADMIN' and status='ACTIVE' limit 1;
+  if not found or not public.carwash_can_operate(staff_row.tenant_id) then raise exception 'Active business administrator access is required.' using errcode='42501'; end if;
+  if staff_row.role not in ('RECEPTIONIST','WASHER') then raise exception 'Only invited team accounts can be changed here.' using errcode='42501'; end if;
+  update public.carwash_memberships set status=next_status where id=target_membership returning * into staff_row;
+  insert into public.carwash_audit_logs(tenant_id,actor_user_id,action,entity_type,entity_id,details)
+    values(staff_row.tenant_id,auth.uid(),'STAFF_STATUS_CHANGED','MEMBERSHIP',staff_row.id::text,jsonb_build_object('status',next_status));
+  return staff_row;
 end;
 $$;
 
@@ -691,6 +784,9 @@ revoke all on function public.carwash_has_tenant_access(uuid,text[]) from public
 revoke all on function public.carwash_can_operate(uuid) from public, anon;
 revoke all on function public.carwash_is_assigned_worker(uuid,uuid) from public, anon;
 revoke all on function public.carwash_transition_order(uuid,text) from public, anon;
+revoke all on function public.carwash_assign_order(uuid,uuid) from public, anon;
+revoke all on function public.carwash_create_order(uuid,uuid,uuid,uuid[],uuid) from public, anon;
+revoke all on function public.carwash_update_staff_status(uuid,text) from public, anon;
 revoke all on function public.carwash_record_payment(uuid,numeric,text,text) from public, anon;
 revoke all on function public.carwash_review_commission(uuid,text) from public, anon;
 revoke all on function public.carwash_submit_business_request(text,text,text) from public, anon;
@@ -701,6 +797,7 @@ revoke all on function public.carwash_delete_business_requests(uuid[]) from publ
 revoke all on function public.carwash_activate_tenant_plan(uuid,uuid) from public, anon;
 revoke all on function public.carwash_notify_billing_status(uuid) from public, anon;
 revoke all on function public.carwash_update_platform_admin_name(text) from public, anon;
+revoke all on function public.carwash_update_tenant_settings(uuid,text,text,numeric) from public, anon;
 revoke all on function public.carwash_consume_rate_limit(text,integer,integer) from public, anon, authenticated;
 
 grant execute on function public.carwash_is_platform_admin() to authenticated;
@@ -708,6 +805,9 @@ grant execute on function public.carwash_has_tenant_access(uuid,text[]) to authe
 grant execute on function public.carwash_can_operate(uuid) to authenticated;
 grant execute on function public.carwash_is_assigned_worker(uuid,uuid) to authenticated;
 grant execute on function public.carwash_transition_order(uuid,text) to authenticated;
+grant execute on function public.carwash_assign_order(uuid,uuid) to authenticated;
+grant execute on function public.carwash_create_order(uuid,uuid,uuid,uuid[],uuid) to authenticated;
+grant execute on function public.carwash_update_staff_status(uuid,text) to authenticated;
 grant execute on function public.carwash_record_payment(uuid,numeric,text,text) to authenticated;
 grant execute on function public.carwash_review_commission(uuid,text) to authenticated;
 grant execute on function public.carwash_submit_business_request(text,text,text) to authenticated;
@@ -718,5 +818,6 @@ grant execute on function public.carwash_delete_business_requests(uuid[]) to aut
 grant execute on function public.carwash_activate_tenant_plan(uuid,uuid) to authenticated;
 grant execute on function public.carwash_notify_billing_status(uuid) to authenticated;
 grant execute on function public.carwash_update_platform_admin_name(text) to authenticated;
+grant execute on function public.carwash_update_tenant_settings(uuid,text,text,numeric) to authenticated;
 
 -- Call carwash_transition_order from authenticated clients for atomic, role-checked transitions.

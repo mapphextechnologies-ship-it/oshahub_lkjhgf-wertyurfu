@@ -7,6 +7,7 @@ import {
   Settings, ShieldCheck, Sparkles, Store, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff
 } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage } from '../services/supabaseBrowser.js';
+import { dbMethod, loadLiveWorkspace } from './liveWorkspace.js';
 import {
   clearLegacyBrowserData, clearSession, demoUsers, formatKes, getSession, markUserSeen,
   newId, readDb, saveSession, todayLabel, wasUserSeen
@@ -50,8 +51,42 @@ export default function CarWashApp() {
   const [toast, setToast] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState('');
+  const [whatsAppLink, setWhatsAppLink] = useState('');
 
   useEffect(()=>{ clearLegacyBrowserData(); },[]);
+  useEffect(()=>{
+    if(!supabaseBrowser)return;
+    let active=true;
+    supabaseBrowser.auth.getSession().then(async({data,error})=>{
+      if(!active||error||!data.session?.user)return;
+      try{
+        const authUser=data.session.user;
+        const {data:memberships,error:membershipError}=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role').limit(10);
+        if(membershipError)throw membershipError;
+        const membership=(memberships||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role));
+        if(!membership){if(active)setShowLogin(true);return;}
+        const role=({BUSINESS_ADMIN:'Business Admin',RECEPTIONIST:'Receptionist',WASHER:'Washer'})[membership.role];
+        const {data:tenant,error:tenantError}=await supabaseBrowser.from('carwash_tenants').select('name').eq('id',membership.tenant_id).single();
+        if(tenantError)throw tenantError;
+        const {data:canOperate,error:billingError}=await supabaseBrowser.rpc('carwash_can_operate',{target_tenant:membership.tenant_id});
+        if(billingError)throw billingError;
+        if(canOperate===false){const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
+        const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
+        if(messageError)throw messageError;
+        if(messages?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',messages[0].id);
+        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch,billingRestricted:canOperate===false,activationMessage:messages?.[0]?.body};saveSession(session);setUser(session);}
+      }catch(error){if(active){setShowLogin(true);setToast(error.message||'Unable to reconnect your workspace.');}}
+    });
+    return()=>{active=false;};
+  },[]);
+  useEffect(()=>{
+    if(!user?.authUserId||!user.tenant_id)return;
+    let active=true; setLiveLoading(true); setLiveError('');
+    loadLiveWorkspace(user).then(({db:liveDb})=>{if(active)setDb(liveDb);}).catch((error)=>{if(active)setLiveError(error?.message||'Unable to load this business workspace.');}).finally(()=>{if(active)setLiveLoading(false);});
+    return()=>{active=false;};
+  },[user?.authUserId,user?.tenant_id]);
   useEffect(()=>{ if(!toast)return; const id=setTimeout(()=>setToast(''),2700); return()=>clearTimeout(id); },[toast]);
   useEffect(()=>{
     if(!user)return;
@@ -85,6 +120,12 @@ export default function CarWashApp() {
   const workerJobs = role==='Washer' ? scopedJobs.filter((job)=>job.washerId===user.staffId || job.washerId===scopedStaff.find((staff)=>staff.email===user.email)?.id) : scopedJobs;
   const myNav = ROLE_NAV[role] || [];
 
+  useEffect(()=>{
+    if(!user)return;
+    const saved=window.sessionStorage.getItem('cw-workspace-screen');
+    if(!myNav.some(([key])=>key===screen))setScreen(myNav.some(([key])=>key===saved)?saved:'overview');
+  },[user?.id,role]);
+
   function patchDb(edit) { setDb((old)=>edit(JSON.parse(JSON.stringify(old)))); }
   function notify(message) { setToast(message); }
   function navigate(key) { setScreen(key); setMenuOpen(false); setQuery(''); setFilter('All'); }
@@ -95,13 +136,25 @@ export default function CarWashApp() {
     setToast(selected.activationMessage || `${wasUserSeen(selected.email)?'Welcome back':'Welcome'}, ${selected.name.split(' ')[0]}`);
     markUserSeen(selected.email);
     window.sessionStorage.removeItem('cw-auth-view');window.sessionStorage.removeItem('cw-auth-mode');window.location.hash='/';
-    saveSession(session); setUser(session); setScreen('overview');
+    saveSession(session); setUser(session);
   }
-  function logout() { if(supabaseBrowser&&user?.authUserId)supabaseBrowser.auth.signOut(); clearSession(); setUser(null); setScreen('overview'); setModal(''); window.location.hash='/'; }
+  function logout() { if(supabaseBrowser&&user?.authUserId)supabaseBrowser.auth.signOut(); clearSession(); setUser(null); setModal(''); window.location.hash='/'; }
 
   function updateJob(id, action) {
     const transitions={ assign:['WAITING','ASSIGNED'], start:['ASSIGNED','IN PROGRESS'], complete:['IN PROGRESS','COMPLETED'], ready:['COMPLETED','READY'], deliver:['READY','DELIVERED'], close:['DELIVERED','CLOSED'] };
     const [from,to]=transitions[action]||[];
+    if(user.authUserId){
+      if(user.billingRestricted){notify('This plan is overdue. Wash operations are read-only until the plan is reactivated.');return;}
+      const state={assign:'ASSIGNED',start:'IN PROGRESS',complete:'COMPLETED',ready:'READY',deliver:'DELIVERED',close:'CLOSED'}[action];
+      (async()=>{try{
+        if(action==='assign'){
+          const washer=db.staff.find((person)=>person.tenant_id===tenantId&&person.role==='Washer'&&person.status==='Active');
+          const {error}=await supabaseBrowser.rpc('carwash_assign_order',{target_order:id,target_washer:washer?.id||null});if(error)throw error;
+        } else {const {error}=await supabaseBrowser.rpc('carwash_transition_order',{target_order:id,target_state:state});if(error)throw error;}
+        const {db:next}=await loadLiveWorkspace(user);setDb(next);notify(action==='complete'?'Wash completed · commission added to the ledger.':`Job moved to ${state.toLowerCase()}.`);
+      }catch(error){notify(error.message||'Could not update this wash order.');}})();
+      return;
+    }
     let affected;
     patchDb((next)=>{
       const job=next.jobs.find((item)=>item.id===id&&item.tenant_id===tenantId);
@@ -120,6 +173,11 @@ export default function CarWashApp() {
 
   function recordPayment(job) {
     if(job.paymentStatus==='PAID')return;
+    if(user.authUserId){
+      if(user.billingRestricted){notify('This plan is overdue. Payments are restricted until the plan is reactivated.');return;}
+      (async()=>{try{const outstanding=Number((job.total-(job.paidAmount||0)).toFixed(2));const {error}=await supabaseBrowser.rpc('carwash_record_payment',{target_order:job.id,paid_amount:outstanding,payment_method:'CASH',payment_reference:null});if(error)throw error;const {db:next}=await loadLiveWorkspace(user);setDb(next);notify('Payment recorded.');}catch(error){notify(error.message||'Could not record payment.');}})();
+      return;
+    }
     patchDb((next)=>{
       const item=next.jobs.find((row)=>row.id===job.id);if(!item||item.paymentStatus==='PAID')return next;
       item.paymentStatus='PAID';item.paymentMethod='Cash';
@@ -128,8 +186,36 @@ export default function CarWashApp() {
     }); notify('Payment recorded.');
   }
 
-  function submitModal(form) {
+  async function submitModal(form) {
     const tenant_id=tenantId;
+    if(user.authUserId){
+      try{
+        if(user.billingRestricted)throw new Error('This plan is overdue. Workspace changes are restricted until the plan is reactivated.');
+        if(modal==='order'){
+          let customer=db.customers.find((item)=>item.phone.trim()===form.phone.trim());
+          if(!customer){const {data,error}=await supabaseBrowser.from('carwash_customers').insert({tenant_id,full_name:form.customer.trim(),phone:form.phone.trim(),email:form.email.trim()||null}).select().single();if(error)throw error;customer={id:data.id};}
+          let vehicle=db.vehicles.find((item)=>item.registration.toLowerCase()===form.registration.trim().toLowerCase());
+          if(!vehicle){const {data,error}=await supabaseBrowser.from('carwash_vehicles').insert({tenant_id,customer_id:customer.id,registration:form.registration.trim().toUpperCase(),make:form.make.trim(),model:form.model.trim(),color:form.color.trim()||null}).select().single();if(error)throw error;vehicle={id:data.id};}
+          const selectedServices=db.services.filter((service)=>form.serviceIds.includes(service.id));
+          if(!selectedServices.length)throw new Error('Choose at least one active service.');
+          const {data:order,error:orderError}=await supabaseBrowser.rpc('carwash_create_order',{target_tenant:tenant_id,target_customer:customer.id,target_vehicle:vehicle.id,target_services:selectedServices.map((service)=>service.id),target_washer:form.washerId||null});if(orderError)throw orderError;
+          if(form.paymentStatus==='PAID'){const {error}=await supabaseBrowser.rpc('carwash_record_payment',{target_order:order.id,paid_amount:Number(order.subtotal_kes),payment_method:dbMethod(form.method)});if(error)throw error;}
+        } else if(modal==='customer'){
+          const {data:customer,error}=await supabaseBrowser.from('carwash_customers').insert({tenant_id,full_name:form.name.trim(),phone:form.phone.trim(),email:form.email.trim()||null}).select().single();if(error)throw error;
+          if(form.registration.trim()){const {error:vehicleError}=await supabaseBrowser.from('carwash_vehicles').insert({tenant_id,customer_id:customer.id,registration:form.registration.trim().toUpperCase(),make:form.make.trim()||'Unknown',model:form.model.trim()||'Unknown'});if(vehicleError)throw vehicleError;}
+        } else if(modal==='service'){
+          const {error}=await supabaseBrowser.from('carwash_services').insert({tenant_id,name:form.name.trim(),category:form.category.trim()||null,price_kes:K(form.price),commission_kes:K(form.commission),estimated_minutes:K(form.duration)||30,active:true});if(error)throw error;
+        } else if(modal==='staff'){
+          const role= form.role==='Washer'?'WASHER':'RECEPTIONIST';
+          const {data:token,error}=await supabaseBrowser.rpc('carwash_create_staff_invite',{target_tenant:tenant_id,target_phone:form.phone.trim(),target_role:role});if(error)throw error;
+          const inviteUrl=new URL(window.location.origin);inviteUrl.searchParams.set('invite',token);
+          const digits=form.phone.replace(/\D/g,'');const message=`You’re invited to join ${tenant.name} as ${form.role}. Register with this secure link: ${inviteUrl.toString()} (expires in 72 hours).`;
+          setWhatsAppLink(`https://wa.me/${digits}?text=${encodeURIComponent(message)}`);
+        }
+        const {db:next}=await loadLiveWorkspace(user);setDb(next);setModal('');notify(modal==='staff'?'Invitation created. Share it through WhatsApp.':'Saved successfully.');
+      }catch(error){notify(error.message||'Could not save this change.');}
+      return;
+    }
     patchDb((next)=>{
       if(modal==='order'){
         let customer=next.customers.find((item)=>item.phone.trim()===form.phone.trim()&&item.tenant_id===tenant_id);
@@ -168,7 +254,8 @@ export default function CarWashApp() {
 
   if(!user&&!showLogin)return <PublicLandingPage onLogin={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','login');window.location.hash='/login';setAuthMode('login');setShowLogin(true)}} onRegister={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','register');window.location.hash='/register';setAuthMode('register');setShowLogin(true)}} />;
   if(!user)return <LoginScreen initialMode={authMode} onLogin={login} onBack={()=>{window.sessionStorage.removeItem('cw-auth-view');window.sessionStorage.removeItem('cw-auth-mode');window.sessionStorage.removeItem('cw-auth-scroll');window.location.hash='/';window.scrollTo({top:0,behavior:'instant'});setShowLogin(false)}}/>;
-  if(user.authUserId)return <SupabasePortalGate user={user} onLogout={logout}/>;
+  if(user.authUserId&&liveLoading)return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">BUSINESS WORKSPACE</span><h1>Loading your wash floor…</h1><p>Connecting your business dashboard to its secure Supabase records.</p></div></div>;
+  if(user.authUserId&&!user.tenant_id)return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">WORKSPACE ACCESS</span><h1>No business workspace assigned</h1><p>Ask the platform administrator to check your active membership.</p><button className="cw-primary" onClick={logout}>Sign out</button></div></div>;
 
   return <div className="cw-shell">
     <aside className={`cw-sidebar ${menuOpen?'is-open':''}`}>
@@ -182,62 +269,30 @@ export default function CarWashApp() {
     <main className="cw-main">
       <header className="cw-topbar"><button className="cw-icon-button cw-mobile-menu" onClick={()=>setMenuOpen(true)} aria-label="Open menu"><Menu size={21}/></button><div className="cw-crumb"><span>{role==='SaaS Super Admin'?'Platform':tenant?.name}</span><ChevronRight size={14}/><b>{NAV_TITLES[screen]||'My profile'}</b></div><div className="cw-top-actions"><span className="cw-date"><CalendarDays size={15}/>{todayLabel()}</span><button className="cw-icon-button cw-notification" onClick={()=>notify('You’re all caught up.')} aria-label="Notifications"><Bell size={18}/></button><div className="cw-top-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div></header>
       <section className="cw-page">
+        {liveError&&<div className="cw-auth-alert error" role="alert">{liveError}</div>}
+        {user.billingRestricted&&<div className="cw-auth-alert error" role="alert"><b>Plan overdue. Your workspace is restricted.</b><br/>{user.activationMessage||'Contact the platform administrator to confirm payment and reactivate the plan.'}</div>}
+        {whatsAppLink&&<div className="cw-auth-alert" role="status">Invitation ready. <a href={whatsAppLink} target="_blank" rel="noreferrer">Open WhatsApp and send the secure invite</a><button onClick={()=>setWhatsAppLink('')} aria-label="Dismiss invitation"> ×</button></div>}
         {screen==='overview'&&<Overview db={db} role={role} user={user} jobs={workerJobs} revenue={dailyRevenue} active={activeCount} ready={readyCount} onNavigate={navigate} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment}/>}
         {screen==='jobs'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment}/>}
         {screen==='history'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} history onTransition={updateJob} onPayment={recordPayment}/>}
         {screen==='customers'&&<CustomersPage customers={scopedCustomers} vehicles={scoped(db.vehicles)} query={query} setQuery={setQuery} onAdd={()=>setModal('customer')}/>}
-        {screen==='services'&&<ServicesPage services={scopedServices} onAdd={()=>setModal('service')} onChange={(service)=>patchDb((next)=>{const item=next.services.find((row)=>row.id===service.id);if(item)item.active=!item.active;return next;})}/>}
-        {screen==='staff'&&<StaffPage staff={scopedStaff} jobs={scopedJobs} onAdd={()=>setModal('staff')} onChange={(person)=>patchDb((next)=>{const item=next.staff.find((row)=>row.id===person.id);if(item)item.status=item.status==='Active'?'Inactive':'Active';return next;})}/>}
+        {screen==='services'&&<ServicesPage services={scopedServices} onAdd={()=>setModal('service')} onChange={async(service)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}const {error}=await supabaseBrowser.from('carwash_services').update({active:!service.active}).eq('id',service.id).eq('tenant_id',tenantId);if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{const item=next.services.find((row)=>row.id===service.id);if(item)item.active=!item.active;return next;});}}/>}
+        {screen==='staff'&&<StaffPage staff={scopedStaff} jobs={scopedJobs} onAdd={()=>setModal('staff')} onChange={async(person)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_staff_status',{target_membership:person.id,next_status:person.status==='Active'?'SUSPENDED':'ACTIVE'});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{const item=next.staff.find((row)=>row.id===person.id);if(item)item.status=item.status==='Active'?'Inactive':'Active';return next;});}}/>}
         {screen==='payments'&&<PaymentsPage payments={scoped(db.payments)} jobs={scopedJobs} customers={scopedCustomers} onPayment={recordPayment}/>}
-        {screen==='commissions'&&<LedgerPage title="Commission ledger" subtitle="Worker earnings are recorded against completed wash jobs." rows={scoped(db.commissions)} db={db} onReview={(entry,status)=>{patchDb((next)=>{const row=next.commissions.find((item)=>item.id===entry.id);if(row)row.status=status;return next;});notify(status==='APPROVED'?'Commission approved.':'Commission payout recorded.');}}/>}
+        {screen==='commissions'&&<LedgerPage title="Commission ledger" subtitle="Worker earnings are recorded against completed wash jobs." rows={scoped(db.commissions)} db={db} onReview={async(entry,status)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}const {error}=await supabaseBrowser.rpc('carwash_review_commission',{ledger_entry:entry.id,next_status:status});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{const row=next.commissions.find((item)=>item.id===entry.id);if(row)row.status=status;return next;});notify(status==='APPROVED'?'Commission approved.':'Commission payout recorded.');}}/>}
         {screen==='earnings'&&<EarningsPage user={user} jobs={workerJobs} commissions={scoped(db.commissions)} db={db}/>}
         {screen==='loyalty'&&<LoyaltyPage customers={scopedCustomers} ledger={scoped(db.loyalty||[])} db={db}/>}
         {screen==='reports'&&<ReportsPage jobs={scopedJobs} payments={scoped(db.payments)} commissions={scoped(db.commissions)} db={db} role={role}/>}
         {screen==='tenants'&&<TenantsPage tenants={db.tenants} onAdd={()=>setModal('tenant')} onChange={(item,status)=>patchDb((next)=>{const row=next.tenants.find((x)=>x.id===item.id);if(row)row.status=status;return next;})}/>}
         {screen==='plans'&&<PlansPage plans={db.plans||[]} tenants={db.tenants} onAdd={()=>setModal('plan')}/>}
         {screen==='audit'&&<AuditPage rows={scoped(db.audit)}/>}
-        {screen==='settings'&&<SettingsPage db={db} onSave={(form)=>{patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
+        {screen==='settings'&&<SettingsPage db={db} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
         {screen==='profile'&&<ProfilePage user={user} tenant={tenant} onLogout={logout}/>}
       </section>
     </main>
     {modal&&<FormModal type={modal} db={db} tenantId={tenantId} onClose={()=>setModal('')} onSubmit={submitModal}/>}
     {!!toast&&<div className="cw-toast"><CheckCircle2 size={18}/>{toast}</div>}
   </div>;
-}
-
-function SupabasePortalGate({user,onLogout}){
-  const [requests,setRequests]=useState([]),[loading,setLoading]=useState(true),[notice,setNotice]=useState('');
-  const [invitePhone,setInvitePhone]=useState(''),[inviteRole,setInviteRole]=useState('WASHER'),[whatsAppLink,setWhatsAppLink]=useState('');
-  const canReview=user.role==='SaaS Super Admin';
-  async function refresh(){
-    setLoading(true);
-    const {data,error}=await supabaseBrowser.from('carwash_access_requests').select('id,tenant_name,owner_name,phone,status,created_at').eq('status','PENDING').order('created_at',{ascending:true});
-    if(error)setNotice(error.message);else setRequests(data||[]);
-    setLoading(false);
-  }
-  useEffect(()=>{if(canReview)refresh();},[canReview]);
-  async function review(id,approve){
-    setNotice('');
-    const {error}=await supabaseBrowser.rpc('carwash_review_business_request',{p_request:id,p_approve:approve});
-    if(error){setNotice(error.message);return;}
-    setNotice(approve?'Business approved and activation message delivered to the in-app inbox.':'Request declined and the applicant was notified in-app.');
-    await refresh();
-  }
-  async function createStaffInvite(event){
-    event.preventDefault();setNotice('');setWhatsAppLink('');
-    const {data:token,error}=await supabaseBrowser.rpc('carwash_create_staff_invite',{target_tenant:user.tenant_id,target_phone:invitePhone,target_role:inviteRole==='Washer'?'WASHER':'RECEPTIONIST'});
-    if(error){setNotice(error.message);return;}
-    const inviteUrl=new URL(window.location.origin);inviteUrl.searchParams.set('invite',token);
-    const digits=invitePhone.replace(/\D/g,'');
-    const text=`You’re invited to join ${user.tenant_name||'OshaHub Carwash'} as ${inviteRole}. Open this secure link to register your account: ${inviteUrl.toString()} (expires in 72 hours).`;
-    setWhatsAppLink(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`);
-    setNotice('Invitation created. Open WhatsApp and tap Send to deliver the secure, one-time link.');
-  }
-  return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">{canReview?'PLATFORM CONTROL':'SECURE PORTAL'}</span><h1>{canReview?'Business access requests':`Welcome, ${user.name.split(' ')[0]}`}</h1><p>{canReview?'Review new business registrations. Approval creates the tenant and Business Admin membership in one database transaction.':`You’re signed in to the ${user.role} portal${user.tenant_name?` for ${user.tenant_name}`:''}. Account approval is active. The live wash operations workspace is not connected to this Supabase project yet.`}</p>
-  {user.billingRestricted&&<div className="cw-auth-alert error" role="alert"><b>Plan overdue. Workspace is restricted.</b><br/>{user.activationMessage||`Your plan for ${user.tenant_name||'this business'} is overdue. The account remains available in restricted mode. Please contact the platform administrator to confirm payment and reactivate the plan.`}</div>}
-  {canReview&&<><div className="cw-gate-section-head"><b>Pending business requests</b><button onClick={refresh}>Refresh</button></div>{loading?<p>Loading requests…</p>:requests.length?<div className="cw-approval-list">{requests.map((request)=><article key={request.id}><div><b>{request.tenant_name}</b><span>{request.owner_name} · {request.phone}</span><small>{new Date(request.created_at).toLocaleDateString()}</small></div><div className="cw-approval-actions"><button onClick={()=>review(request.id,false)}>Decline</button><button onClick={()=>review(request.id,true)}>Approve</button></div></article>)}</div>:<p>No requests waiting for review.</p>}</>}
-  {user.role==='Business Admin'&&!user.billingRestricted&&<section className="cw-invite-panel"><div className="cw-gate-section-head"><b>Invite a team member</b></div><p>Add an employee to the right portal. The invite link expires after 72 hours.</p><form onSubmit={createStaffInvite}><label>WhatsApp number<input type="tel" autoComplete="tel" required minLength="7" placeholder="+254 7xx xxx xxx" value={invitePhone} onChange={(e)=>setInvitePhone(e.target.value)}/></label><label>Portal<select value={inviteRole} onChange={(e)=>setInviteRole(e.target.value)}><option value="WASHER">Washer</option><option value="Receptionist">Receptionist</option></select></label><button className="cw-primary" type="submit">Create secure invitation</button></form>{whatsAppLink&&<a className="cw-whatsapp-link" href={whatsAppLink} target="_blank" rel="noreferrer">Open WhatsApp and send link <ArrowRight size={15}/></a>}</section>}
-  {!!notice&&<div className="cw-auth-alert" role="status">{notice}</div>}<button className="cw-primary cw-enter" onClick={onLogout}>Sign out</button></div></div>;
 }
 
 function PublicLandingPage({onLogin,onRegister}){
@@ -331,7 +386,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     // This app accepts only business and staff memberships. Platform admins
     // authenticate through the standalone console at /super-admin.html.
     let {data:membership,error:membershipError}=await supabaseBrowser.from('carwash_memberships')
-      .select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE')
+      .select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE')
       .order('role',{ascending:true}).limit(10);
     if(membershipError)throw membershipError;
     const platformAdmin=(membership||[]).some((item)=>item.role==='SUPER_ADMIN');
@@ -344,7 +399,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     if(!membership&&authUser.user_metadata?.invite_token){
       const accepted=await supabaseBrowser.rpc('carwash_accept_staff_invitation',{invite_token:authUser.user_metadata.invite_token,staff_name:authUser.user_metadata.full_name||authUser.email});
       if(accepted.error)throw accepted.error;
-      const refreshed=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role',{ascending:true}).limit(10);
+      const refreshed=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role',{ascending:true}).limit(10);
       if(refreshed.error)throw refreshed.error;
       membership=(refreshed.data||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role))||null;
     }
@@ -377,7 +432,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     if(messages?.[0])await supabaseBrowser.from('carwash_user_messages').update({read_at:new Date().toISOString()}).eq('id',messages[0].id);
     const role=roleNames[membership.role];
     if(!role)throw new Error('This account has no supported portal role. Contact your administrator.');
-    onLogin({id:authUser.id,authUserId:authUser.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,billingRestricted,activationMessage:messages?.[0]?.body});
+    onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:messages?.[0]?.body});
   }
   async function submit(event){
     event.preventDefault();setError('');setMessage('');setLoading(true);
@@ -448,7 +503,7 @@ function PlatformPanels({db,onNavigate}){return <div className="cw-content-grid"
 
 function JobsPage({jobs,db,role,query,setQuery,filter,setFilter,history=false,onCreate,onTransition,onPayment}){return <><PageHeading title={history?'Job history':role==='Washer'?'Assigned jobs':'Wash queue'} subtitle={history?'Completed work and earnings history.':'Track every vehicle as it moves through the wash floor.'} action={role==='Receptionist'||role==='Business Admin'?<button className="cw-primary" onClick={onCreate}><Plus size={16}/> Check in vehicle</button>:null}/><div className="cw-toolbar"><div className="cw-search"><Search size={16}/><input placeholder="Search plate, customer, washer…" value={query} onChange={(event)=>setQuery(event.target.value)}/></div><div className="cw-filter">{(history?['All','COMPLETED','READY','DELIVERED','CLOSED']:['All','WAITING','ASSIGNED','IN PROGRESS','COMPLETED','READY']).map((value)=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value==='IN PROGRESS'?'In progress':value.charAt(0)+value.slice(1).toLowerCase()}</button>)}</div></div><div className="cw-panel cw-table-panel"><JobTable jobs={jobs} db={db} role={role} onTransition={onTransition} onPayment={onPayment} history={history}/></div></>}
 function JobTable({jobs,db,role,onTransition,onPayment,compact=false,history=false,empty='No wash orders match this view.'}){
-  return <div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>VEHICLE</th><th>SERVICE</th><th>WASHER</th><th>PAYMENT</th><th>STATUS</th><th className="align-right">TOTAL</th><th/></tr></thead><tbody>{jobs.map((job)=>{const vehicle=db.vehicles.find((item)=>item.id===job.vehicleId),customer=db.customers.find((item)=>item.id===job.customerId),washer=db.staff.find((item)=>item.id===job.washerId),services=job.serviceIds.map((id)=>db.services.find((item)=>item.id===id)?.name).filter(Boolean);return <tr key={job.id}><td><div className="cw-vehicle-cell"><div className="cw-vehicle-icon"><CarFront size={19}/></div><span><b>{vehicle?.registration||'Vehicle'}</b><small>{vehicle?.make} {vehicle?.model} · {customer?.name}</small></span></div></td><td><b className="cw-cell-primary">{services.join(' + ')||'Wash service'}</b><small className="cw-cell-sub">{job.id}</small></td><td><span className="cw-washer-cell"><i>{washer?.name?.split(' ').map((part)=>part[0]).join('')||'—'}</i>{washer?.name||'Unassigned'}</span></td><td><span className={`cw-pay-state ${job.paymentStatus==='PAID'?'paid':'unpaid'}`}>{job.paymentStatus==='PAID'?<CheckCircle2 size={13}/>:<Clock3 size={13}/>} {job.paymentStatus}</span></td><td><StatusPill status={job.status}/></td><td className="align-right"><b className="cw-cell-primary">{formatKes(job.total)}</b><small className="cw-cell-sub">{formatKes(job.commission)} commission</small></td><td><div className="cw-row-actions">{job.paymentStatus!=='PAID'&&['Receptionist','Business Admin'].includes(role)&&<button className="cw-small-action secondary" onClick={()=>onPayment(job)}>Pay</button>}<JobAction job={job} role={role} history={history} onTransition={onTransition}/></div></td></tr>;})}{!jobs.length&&<tr><td colSpan="7"><div className="cw-table-empty"><Waves size={24}/><b>{empty}</b><span>New activity will appear here.</span></div></td></tr>}</tbody></table></div>;
+  return <div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>VEHICLE</th><th>SERVICE</th><th>WASHER</th><th>PAYMENT</th><th>STATUS</th><th className="align-right">TOTAL</th><th/></tr></thead><tbody>{jobs.map((job)=>{const vehicle=db.vehicles.find((item)=>item.id===job.vehicleId),customer=db.customers.find((item)=>item.id===job.customerId),washer=db.staff.find((item)=>item.id===job.washerId),services=job.serviceIds.map((id,index)=>db.services.find((item)=>item.id===id)?.name||job.serviceNames?.[index]).filter(Boolean);return <tr key={job.id}><td><div className="cw-vehicle-cell"><div className="cw-vehicle-icon"><CarFront size={19}/></div><span><b>{vehicle?.registration||'Vehicle'}</b><small>{vehicle?.make} {vehicle?.model} · {customer?.name}</small></span></div></td><td><b className="cw-cell-primary">{services.join(' + ')||'Wash service'}</b><small className="cw-cell-sub">{job.id}</small></td><td><span className="cw-washer-cell"><i>{washer?.name?.split(' ').map((part)=>part[0]).join('')||'—'}</i>{washer?.name||'Unassigned'}</span></td><td><span className={`cw-pay-state ${job.paymentStatus==='PAID'?'paid':'unpaid'}`}>{job.paymentStatus==='PAID'?<CheckCircle2 size={13}/>:<Clock3 size={13}/>} {job.paymentStatus}</span></td><td><StatusPill status={job.status}/></td><td className="align-right"><b className="cw-cell-primary">{formatKes(job.total)}</b><small className="cw-cell-sub">{formatKes(job.commission)} commission</small></td><td><div className="cw-row-actions">{job.paymentStatus!=='PAID'&&['Receptionist','Business Admin'].includes(role)&&<button className="cw-small-action secondary" onClick={()=>onPayment(job)}>Pay</button>}<JobAction job={job} role={role} history={history} onTransition={onTransition}/></div></td></tr>;})}{!jobs.length&&<tr><td colSpan="7"><div className="cw-table-empty"><Waves size={24}/><b>{empty}</b><span>New activity will appear here.</span></div></td></tr>}</tbody></table></div>;
 }
 function JobAction({job,role,history,onTransition}){if(history||job.status==='CLOSED')return <span className="cw-dash">—</span>;const map={WAITING:['assign','Assign washer'],ASSIGNED:['start','Start wash'],'IN PROGRESS':['complete','Complete wash'],COMPLETED:['ready','Mark ready'],READY:['deliver','Collected'],DELIVERED:['close','Close order']};let[action,label]=map[job.status]||[];if(['ASSIGNED','IN PROGRESS'].includes(job.status)&&role!=='Washer')action=null;if(['COMPLETED','READY'].includes(job.status)&&role==='Washer')action=null;if(job.status==='WAITING'&&!['Receptionist','Business Admin'].includes(role))action=null;if(job.status==='DELIVERED'&&role!=='Business Admin')action=null;if(!action)return <span className="cw-dash">{['ASSIGNED','IN PROGRESS'].includes(job.status)?'Washer working':'—'}</span>;return <button className={`cw-small-action ${action==='complete'?'success':''}`} onClick={()=>onTransition(job.id,action)}>{label}</button>;}
 function StatusPill({status}){const kind=status.toLowerCase().replaceAll(' ','-');return <span className={`cw-status status-${kind}`}><i/>{status}</span>}
@@ -463,7 +518,7 @@ function StaffPage({staff,jobs,onAdd,onChange}){
     <div className="cw-panel cw-table-panel"><div className="cw-table-wrap"><table className="cw-table">
       <thead><tr><th>TEAM MEMBER</th><th>ROLE</th><th>BRANCH</th><th>STATUS</th><th>JOBS TODAY</th><th/></tr></thead>
       <tbody>{staff.map((person,index)=><tr key={person.id}>
-        <td><div className="cw-person-cell"><div className={`cw-person-avatar avatar-${index%4}`}>{person.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{person.name}</b><small>{person.email}</small></span></div></td>
+        <td><div className="cw-person-cell"><div className={`cw-person-avatar avatar-${index%4}`}>{person.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{person.name}</b><small>{person.email||person.phone||'Invited team member'}</small></span></div></td>
         <td>{person.role}</td><td>{person.branch}</td>
         <td><span className={`cw-active-tag ${person.status==='Active'?'':'inactive'}`}><i/>{person.status}</span></td>
         <td>{person.role==='Washer'?jobs.filter((job)=>job.washerId===person.id).length:'—'}</td>
@@ -506,7 +561,7 @@ function FormModal({type,db,tenantId,onClose,onSubmit}){const [form,setForm]=use
     {type==='order'&&<><div className="cw-form-section">CUSTOMER DETAILS</div>{field('customer','Customer name','e.g. Grace Wanjiku')}{field('phone','Phone number','07xx xxx xxx','tel')}{field('email','Email (optional)','name@email.com','email',false)}<div className="cw-form-section">VEHICLE</div>{field('registration','Registration','KDA 123A')}{field('make','Make','Toyota')}{field('model','Model','Axio')}<div className="cw-two-fields">{field('color','Color','Silver','text',false)}<label className="cw-form-label">WASHER<select required value={form.washerId||''} onChange={(e)=>set('washerId',e.target.value)}><option value="">Leave in waiting queue</option>{db.staff.filter((item)=>item.tenant_id===tenantId&&item.role==='Washer'&&item.status==='Active').map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></label></div><div className="cw-form-section">SERVICE & PAYMENT</div><label className="cw-form-label">SERVICE<select required multiple value={form.serviceIds} onChange={(event)=>set('serviceIds',Array.from(event.target.selectedOptions).map((option)=>option.value))} size="3">{db.services.filter((item)=>item.tenant_id===tenantId&&item.active).map((item)=><option value={item.id} key={item.id}>{item.name} — {formatKes(item.price)}</option>)}</select><small>Use Ctrl / Command to select more than one service.</small></label><div className="cw-two-fields"><label className="cw-form-label">PAYMENT STATUS<select value={form.paymentStatus} onChange={(e)=>set('paymentStatus',e.target.value)}><option value="PAID">Paid at reception</option><option value="UNPAID">Pay at collection</option></select></label><label className="cw-form-label">METHOD<select value={form.method} onChange={(e)=>set('method',e.target.value)}><option>Cash</option><option>M-Pesa</option><option>Card</option><option>Wallet</option></select></label></div></>}
     {type==='customer'&&<>{field('name','Full name','Customer name')}{field('phone','Phone number','07xx xxx xxx','tel')}{field('email','Email (optional)','name@email.com','email',false)}<div className="cw-form-section">VEHICLE (OPTIONAL)</div>{field('registration','Registration','KDA 123A','text',false)}<div className="cw-two-fields">{field('make','Make','Toyota','text',false)}{field('model','Model','Axio','text',false)}</div></>}
     {type==='service'&&<>{field('name','Service name','e.g. Engine bay clean')}{field('category','Category','Exterior / Interior') }<div className="cw-two-fields">{field('price','Customer price (KES)','500','number')}{field('commission','Washer commission (KES)','100','number')}</div>{field('duration','Estimated minutes','30','number')}</>}
-    {type==='staff'&&<>{field('name','Full name','Team member')}{field('email','Email','worker@example.com','email')}<label className="cw-form-label">ROLE<select value={form.role} onChange={(e)=>set('role',e.target.value)}><option>Washer</option><option>Receptionist</option><option>Business Admin</option></select></label>{field('branch','Branch','Westlands', 'text',false)}</>}
+  {type==='staff'&&<>{field('name','Full name','Team member')}{field('phone','WhatsApp number','+254 7xx xxx xxx','tel')}<label className="cw-form-label">ROLE<select value={form.role} onChange={(e)=>set('role',e.target.value)}><option>Washer</option><option>Receptionist</option></select></label></>}
     {type==='tenant'&&<>{field('name','Business name','Car wash name')}{field('owner','Business owner','Owner name')}<label className="cw-form-label">PLAN<select value={form.plan} onChange={(e)=>set('plan',e.target.value)}><option>Starter</option><option>Growth</option><option>Enterprise</option></select></label>{field('endsAt','Subscription ends','2026-10-24','date')}</>}
     {type==='plan'&&<>{field('name','Plan name','Growth')}{field('price','Price per period (KES)','4900','number')}{field('days','Subscription length in days','30','number')}{field('features','Included features','Branches, users, reports')}</>}
   </div><div className="cw-modal-actions"><button type="button" className="cw-secondary" onClick={onClose}>Cancel</button><button className="cw-primary" disabled={saving}>{saving?<span className="cw-spinner"/>:<><Check size={16}/>{type==='order'?'Create wash order':'Save record'}</>}</button></div></form></div>;
