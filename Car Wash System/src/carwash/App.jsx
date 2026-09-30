@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, Banknote,
   Bell, CalendarDays, CarFront, Check, CheckCircle2, ChevronDown, ChevronRight,
@@ -18,7 +18,7 @@ const ROLE_NAV = {
     ['overview','Overview',LayoutDashboard],['tenants','Businesses',Store],['plans','Plans & billing',Wallet],['reports','Platform reports',FileBarChart2],['audit','Audit & security',ShieldCheck]
   ],
   'Business Admin': [
-    ['overview','Overview',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['services','Services & pricing',Sparkles],['staff','Staff',Users],['payments','Payments',CreditCard],['commissions','Commissions',CircleDollarSign],['loyalty','Loyalty',BadgeCheck],['reports','Reports',FileBarChart2],['settings','Settings',Settings]
+    ['overview','Overview',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['services','Services & pricing',Sparkles],['staff','Staff',Users],['payments','Payments',CreditCard],['commissions','Commissions',CircleDollarSign],['loyalty','Loyalty',BadgeCheck],['reports','Reports',FileBarChart2],['plans-billing','Plans & billing',Wallet],['settings','Settings',Settings]
   ],
   Receptionist: [
     ['overview','Today’s operations',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['payments','Payments',CreditCard]
@@ -55,6 +55,7 @@ export default function CarWashApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const notificationsRef = useRef([]);
   const [modal, setModal] = useState('');
   const [toast, setToast] = useState('');
   const [query, setQuery] = useState('');
@@ -91,10 +92,10 @@ export default function CarWashApp() {
         if(tenantError)throw tenantError;
         const {data:canOperate,error:billingError}=await supabaseBrowser.rpc('carwash_can_operate',{target_tenant:membership.tenant_id});
         if(billingError)throw billingError;
-        if(canOperate===false){const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
+        {const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
         const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
         if(messageError)throw messageError;
-        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch,billingRestricted:canOperate===false,activationMessage:messages?.[0]?.body};saveSession(session);setUser(session);}
+        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch,billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
       }catch(error){if(active)setAuthRestoreError(error.message||'Unable to reconnect your workspace. Check your connection and retry.');}
       finally{if(active)setAuthLoading(false);}
     };
@@ -110,12 +111,23 @@ export default function CarWashApp() {
   useEffect(()=>{
     if(!user?.authUserId)return;
     let active=true;
-    const refresh=()=>supabaseBrowser.from('carwash_user_messages').select('id,kind,subject,body,read_at,created_at').eq('user_id',user.authUserId).order('created_at',{ascending:false}).limit(50)
-      .then(({data,error})=>{if(active&&!error)setNotifications(data||[]);});
+    const refresh=()=>supabaseBrowser.from('carwash_user_messages').select('id,kind,subject,body,read_at,created_at,reference_key').eq('user_id',user.authUserId).order('created_at',{ascending:false}).limit(50)
+      .then(({data,error})=>{if(!active||error)return;const next=data||[];const fresh=next.find((item)=>item.reference_key?.startsWith('PLAN_REMINDER:')||item.reference_key?.startsWith('PLAN_OVERDUE:'));if(fresh&&!notificationsRef.current.some((item)=>item.id===fresh.id))setToast(fresh.body);notificationsRef.current=next;setNotifications(next);});
     refresh();
-    const timer=window.setInterval(refresh,30000);
-    return()=>{active=false;window.clearInterval(timer);};
-  },[user?.authUserId]);
+    const timer=window.setInterval(async()=>{
+      const {error:reminderError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:user.tenant_id});
+      const {data:canOperate,error:billingError}=await supabaseBrowser.rpc('carwash_can_operate',{target_tenant:user.tenant_id});
+      if(!active)return;
+      if(!reminderError&&!billingError&&Boolean(canOperate)!==Boolean(user.billingRestricted)){
+        const next={...user,billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${user.tenant_name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${user.tenant_name||'your business workspace'}.`:''};
+        setUser(next);saveSession(next);
+        if(canOperate===false)setToast(next.activationMessage);
+      }
+      refresh();
+    },60000);
+    const messageTimer=window.setInterval(refresh,30000);
+    return()=>{active=false;window.clearInterval(timer);window.clearInterval(messageTimer);};
+  },[user?.authUserId,user?.tenant_id,user?.billingRestricted]);
   useEffect(()=>{
     if(!user?.authUserId)return undefined;
     const key=activityKey(user.authUserId);
@@ -291,6 +303,7 @@ export default function CarWashApp() {
   }
 
   const dailyRevenue=useMemo(()=>scoped(db.payments).filter((payment)=>payment.status==='PAID').reduce((sum,payment)=>sum+K(payment.amount),0),[db.payments,tenantId,role]);
+  const notificationCount=notifications.filter((item)=>!item.read_at).length+scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length;
   const activeCount=workerJobs.filter((job)=>['ASSIGNED','IN PROGRESS'].includes(job.status)).length;
   const readyCount=workerJobs.filter((job)=>job.status==='READY').length;
   const routeJobs=screen==='history'?workerJobs.filter((job)=>['COMPLETED','READY','DELIVERED','CLOSED'].includes(job.status)):workerJobs;
@@ -317,10 +330,11 @@ export default function CarWashApp() {
     </aside>
     {menuOpen&&<button className="cw-mobile-scrim" onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
     <main className="cw-main">
-      <header className="cw-topbar"><button className="cw-icon-button cw-sidebar-toggle" onClick={()=>{if(window.matchMedia('(max-width: 980px)').matches)setMenuOpen((open)=>!open);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={sidebarCollapsed?'Expand menu':'Toggle menu'} aria-expanded={menuOpen||!sidebarCollapsed}><Menu size={20}/></button><div className="cw-crumb"><span>{role==='SaaS Super Admin'?'Platform':tenant?.name}</span><ChevronRight size={14}/><b>{NAV_TITLES[screen]||'My profile'}</b></div><div className="cw-top-actions"><span className="cw-date"><CalendarDays size={15}/>{todayLabel()}</span><div className="cw-notification-wrap"><button className="cw-icon-button cw-notification" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications" aria-expanded={notificationsOpen}><Bell size={18}/>{(notifications.some((item)=>!item.read_at)||scopedJobs.some((job)=>job.paymentStatus!=='PAID'))&&<i/>}</button>{notificationsOpen&&<div className="cw-notification-panel"><div className="cw-notification-head"><b>Notification center</b><button onClick={()=>{const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('user_id',user.authUserId).is('read_at',null).then(()=>setNotifications((old)=>old.map((item)=>({...item,read_at:item.read_at||now}))));}}>Mark all read</button></div>{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length>0&&<button className="cw-notification-item unpaid" onClick={()=>{navigate('payments');setNotificationsOpen(false);}}><b>{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length} unpaid wash order{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length===1?'':'s'}</b><span>Payments are still due at the front desk.</span><small>Open payments <ArrowRight size={12}/></small></button>}{notifications.map((item)=><button key={item.id} className={`cw-notification-item ${item.read_at?'':'unread'}`} onClick={()=>{if(!item.read_at){const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('id',item.id).then(()=>setNotifications((old)=>old.map((entry)=>entry.id===item.id?{...entry,read_at:now}:entry)));}}}><b>{item.subject}</b><span>{item.body}</span><small>{new Date(item.created_at).toLocaleString('en-KE')}</small></button>)}{!notifications.length&&!scopedJobs.some((job)=>job.paymentStatus!=='PAID')&&<p className="cw-notification-empty">You’re all caught up.</p>}</div>}</div><div className="cw-top-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div></header>
+      <header className="cw-topbar"><button className="cw-icon-button cw-sidebar-toggle" onClick={()=>{if(window.matchMedia('(max-width: 980px)').matches)setMenuOpen((open)=>!open);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={sidebarCollapsed?'Expand menu':'Toggle menu'} aria-expanded={menuOpen||!sidebarCollapsed}><Menu size={20}/></button><div className="cw-crumb"><span>{role==='SaaS Super Admin'?'Platform':tenant?.name}</span><ChevronRight size={14}/><b>{NAV_TITLES[screen]||'My profile'}</b></div><div className="cw-top-actions"><span className="cw-date"><CalendarDays size={15}/>{todayLabel()}</span><div className="cw-notification-wrap"><button className="cw-icon-button cw-notification" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications" aria-expanded={notificationsOpen}><Bell size={18}/>{notificationCount>0&&<i>{notificationCount>99?'99+':notificationCount}</i>}</button>{notificationsOpen&&<div className="cw-notification-panel"><div className="cw-notification-head"><b>Notification center</b><button onClick={()=>{const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('user_id',user.authUserId).is('read_at',null).then(()=>setNotifications((old)=>old.map((item)=>({...item,read_at:item.read_at||now}))));}}>Mark all read</button></div>{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length>0&&<button className="cw-notification-item unpaid" onClick={()=>{navigate('payments');setNotificationsOpen(false);}}><b>{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length} unpaid wash order{scopedJobs.filter((job)=>job.paymentStatus!=='PAID').length===1?'':'s'}</b><span>Payments are still due at the front desk.</span><small>Open payments <ArrowRight size={12}/></small></button>}{notifications.map((item)=><button key={item.id} className={`cw-notification-item ${item.read_at?'':'unread'}`} onClick={()=>{if(!item.read_at){const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('id',item.id).then(()=>setNotifications((old)=>old.map((entry)=>entry.id===item.id?{...entry,read_at:now}:entry)));}}}><b>{item.subject}</b><span>{item.body}</span><small>{new Date(item.created_at).toLocaleString('en-KE')}</small></button>)}{!notifications.length&&!scopedJobs.some((job)=>job.paymentStatus!=='PAID')&&<p className="cw-notification-empty">You’re all caught up.</p>}</div>}</div><div className="cw-top-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div></header>
       <section className="cw-page">
         {liveError&&<div className="cw-auth-alert error" role="alert">{liveError}</div>}
-        {user.billingRestricted&&<div className="cw-auth-alert error" role="alert"><b>Plan overdue. Your workspace is restricted.</b><br/>{user.activationMessage||'Contact the platform administrator to confirm payment and reactivate the plan.'}</div>}
+        {user.billingRestricted&&<div className="cw-auth-alert error" role="alert"><b>Your workspace is restricted.</b><br/>{user.activationMessage||`Make a payment to continue using ${user.tenant_name||'your business workspace'}.`}</div>}
+        {!user.billingRestricted&&notifications.find((item)=>item.reference_key?.startsWith('PLAN_REMINDER:')&&!item.read_at)&&<div className="cw-auth-alert billing-reminder" role="status"><b>Subscription reminder</b><br/>{notifications.find((item)=>item.reference_key?.startsWith('PLAN_REMINDER:')&&!item.read_at)?.body}</div>}
         {screen==='overview'&&<Overview db={db} role={role} user={user} jobs={workerJobs} revenue={dailyRevenue} active={activeCount} ready={readyCount} onNavigate={navigate} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment}/>}
         {screen==='jobs'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment}/>}
         {screen==='history'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} history onTransition={updateJob} onPayment={recordPayment}/>}
@@ -328,6 +342,7 @@ export default function CarWashApp() {
         {screen==='services'&&<ServicesPage services={scopedServices} onAdd={()=>setModal('service')} onChange={async(service)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}const {error}=await supabaseBrowser.from('carwash_services').update({active:!service.active}).eq('id',service.id).eq('tenant_id',tenantId);if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{const item=next.services.find((row)=>row.id===service.id);if(item)item.active=!item.active;return next;});}}/>}
         {screen==='staff'&&<StaffPage staff={scopedStaff} jobs={scopedJobs} onAdd={()=>setModal('staff')} onChange={async(person)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_staff_status',{target_membership:person.id,next_status:person.status==='Active'?'SUSPENDED':'ACTIVE'});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{const item=next.staff.find((row)=>row.id===person.id);if(item)item.status=item.status==='Active'?'Inactive':'Active';return next;});}}/>}
         {screen==='payments'&&<PaymentsPage payments={scoped(db.payments)} jobs={scopedJobs} customers={scopedCustomers} onPayment={recordPayment}/>}
+        {screen==='plans-billing'&&<CustomerBillingPage billing={db.billing} tenant={tenant} onRequest={async(payload)=>{try{const {error}=await supabaseBrowser.rpc('carwash_request_billing_action',{p_request_type:payload.type,p_plan_id:payload.planId||null,p_payment_method:payload.method||null,p_payment_reference:payload.reference||null});if(error)throw error;notify(payload.type==='TRIAL_EXTENSION'?'Your extra 7-day trial request has been sent to OshaHub.':'Your payment details have been sent for verification. We’ll notify you when the plan is active.');const {db:next}=await loadLiveWorkspace(user);setDb(next);}catch(error){notify(error.message||'Could not submit your billing request.');}}}/>}
         {screen==='commissions'&&<LedgerPage title="Commission ledger" subtitle="Worker earnings are recorded against completed wash jobs." rows={scoped(db.commissions)} db={db} onReview={async(entry,status)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}const {error}=await supabaseBrowser.rpc('carwash_review_commission',{ledger_entry:entry.id,next_status:status});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{const row=next.commissions.find((item)=>item.id===entry.id);if(row)row.status=status;return next;});notify(status==='APPROVED'?'Commission approved.':'Commission payout recorded.');}}/>}
         {screen==='earnings'&&<EarningsPage user={user} jobs={workerJobs} commissions={scoped(db.commissions)} db={db}/>}
         {screen==='loyalty'&&<LoyaltyPage customers={scopedCustomers} ledger={scoped(db.loyalty||[])} db={db}/>}
@@ -481,15 +496,12 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
       const {data:canOperate,error:billingError}=await supabaseBrowser.rpc('carwash_can_operate',{target_tenant:membership.tenant_id});
       if(billingError)throw billingError;
       billingRestricted=canOperate===false;
-      if(billingRestricted){
-        const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});
-        if(noticeError)throw noticeError;
-      }
+      {const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
     }
     const {data:messages}=await supabaseBrowser.from('carwash_user_messages').select('id,subject,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
     const role=roleNames[membership.role];
     if(!role)throw new Error('This account has no supported portal role. Contact your administrator.');
-    onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:messages?.[0]?.body});
+    onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:billingRestricted?`Your ${tenant?.name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant?.name||'your business workspace'}.`:messages?.[0]?.body});
   }
   async function submit(event){
     event.preventDefault();setError('');setMessage('');setLoading(true);
@@ -599,6 +611,36 @@ function TenantsPage({tenants,onAdd,onChange}){return <><PageHeading title="Busi
 function TenantsTable({tenants,onChange,compact=false}){return <div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>BUSINESS</th><th>OWNER</th><th>PLAN</th><th>BRANCHES</th><th>SUBSCRIPTION</th><th>ENDS</th>{!compact&&<th/>}</tr></thead><tbody>{tenants.map((item,index)=><tr key={item.id}><td><div className="cw-person-cell"><div className={`cw-tenant-avatar avatar-${index%4}`}><Store size={16}/></div><span><b>{item.name}</b><small>Joined {item.createdAt}</small></span></div></td><td>{item.owner}</td><td><span className="cw-plan-chip">{item.plan}</span></td><td>{item.branches}</td><td><StatusPill status={item.status}/></td><td>{item.endsAt}</td>{!compact&&<td><select className="cw-status-select" value={item.status} onChange={(event)=>onChange(item,event.target.value)}><option>TRIAL</option><option>ACTIVE</option><option>EXPIRING SOON</option><option>EXPIRED</option><option>SUSPENDED</option></select></td>}</tr>)}</tbody></table></div>}
 
 function PlansPage({plans,tenants,onAdd}){const defaults=[{name:'Starter',price:2900,days:30,features:'1 branch · 3 staff · Core operations'}, {name:'Growth',price:4900,days:30,features:'3 branches · 15 staff · Reports & loyalty'}, {name:'Enterprise',price:9900,days:30,features:'Unlimited branches · Priority support'}];const items=[...defaults,...plans];return <><PageHeading title="Plans & billing" subtitle="Flexible subscription periods and plan controls for car wash tenants." action={<button className="cw-primary" onClick={onAdd}><Plus size={16}/> Create plan</button>}/><div className="cw-service-grid plan-grid">{items.map((plan,index)=><article className="cw-service-card cw-plan-product" key={`${plan.name}-${index}`}><div className="cw-service-head"><div className={`cw-service-icon service-${index%4}`}><Wallet size={19}/></div><span className="cw-active-tag"><i/>AVAILABLE</span></div><span className="cw-service-category">{plan.days||30} DAY SUBSCRIPTION</span><h2>{plan.name}</h2><p>{plan.features}</p><div className="cw-service-price"><span>Subscription price</span><b>{formatKes(plan.price)}<small> / period</small></b></div><div className="cw-service-price"><span>Businesses on plan</span><b>{tenants.filter((tenant)=>tenant.plan===plan.name).length}</b></div><span className="cw-plan-status">Available for tenant assignment</span></article>)}</div><div className="cw-note-box"><ShieldCheck size={17}/><span>Expired accounts enter restricted mode. Their records remain available for billing, audit and reactivation.</span></div></>}
+
+function CustomerBillingPage({billing,tenant,onRequest}){
+  const [selectedPlan,setSelectedPlan]=useState('');
+  const [method,setMethod]=useState('M-PESA');
+  const [reference,setReference]=useState('');
+  const [busy,setBusy]=useState(false);
+  const current=billing?.currentSubscription;
+  const plan=billing?.currentPlan;
+  const trial=current?.status==='TRIAL';
+  const trialEligible=trial&&!billing?.trialExtensionRequested&&!billing?.payments?.length;
+  const daysLeft=current?Math.max(0,Math.ceil((new Date(current.ends_at)-Date.now())/86400000)):0;
+  const plans=billing?.plans||[];
+  const payments=billing?.payments||[];
+  async function submit(payload){setBusy(true);try{await onRequest(payload);}finally{setBusy(false);}}
+  function downloadReport(){
+    const rows=[['Date','Plan','Amount KES','Method','Reference'],...payments.map((payment)=>[new Date(payment.paid_at).toLocaleDateString('en-KE'),plans.find((item)=>item.id===payment.plan_id)?.name||'Subscription',payment.amount_kes,payment.method,payment.external_reference||''])];
+    const csv=rows.map((row)=>row.map((value)=>`"${String(value??'').replaceAll('"','""')}"`).join(',')).join('\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`${(tenant?.name||'oshahub').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}-billing-report.csv`;link.click();URL.revokeObjectURL(url);
+  }
+  return <>
+    <PageHeading title="Plans & billing" subtitle="Manage your OshaHub subscription, request your one-time trial extension, and review confirmed payments."/>
+    <div className="cw-billing-current"><div><span>{trial?'FREE TRIAL':plan?.name?.toUpperCase()||'CURRENT SUBSCRIPTION'}</span><h2>{tenant?.name||'Your business'}</h2><p>{trial?`You have ${daysLeft} day${daysLeft===1?'':'s'} left in your free 7-day trial.`:current?`${plan?.name||'Your plan'} · ${current.status} · Ends ${new Date(current.ends_at).toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`:'Choose a plan to continue using your workspace.'}</p></div><div className="cw-billing-current-mark"><ShieldCheck size={22}/><b>{current?.status||'NO PLAN'}</b></div></div>
+    {trialEligible&&<div className="cw-billing-extension"><div><b>Need a little more time?</b><span>Request one extra 7-day trial. OshaHub will review your request and notify you in the app.</span></div><button className="cw-secondary" disabled={busy||Boolean(billing?.pendingRequest)} onClick={()=>submit({type:'TRIAL_EXTENSION'})}>{billing?.pendingRequest?'Request pending':busy?'Sending…':'Request 7 more days'}</button></div>}
+    {billing?.pendingRequest&&<div className="cw-note-box"><Clock3 size={17}/><span>Your {billing.pendingRequest.request_type==='TRIAL_EXTENSION'?'trial extension':'plan payment'} request is awaiting OshaHub review.</span></div>}
+    <PageHeading title="Available plans" subtitle="Choose a plan for your car wash. Plan access starts after OshaHub confirms your payment."/>
+    <div className="cw-customer-plan-grid">{plans.map((item,index)=><article className={`cw-customer-plan ${selectedPlan===item.id?'selected':''}`} key={item.id}><span className="cw-service-category">{item.days} DAY SUBSCRIPTION</span><h3>{item.name}</h3><p>{item.features}</p><strong>{formatKes(item.price)}<small> / period</small></strong><button className={selectedPlan===item.id?'cw-secondary':'cw-primary'} onClick={()=>setSelectedPlan(item.id)}>{selectedPlan===item.id?'Selected':'Choose plan'}</button></article>)}</div>
+    {selectedPlan&&<section className="cw-panel cw-billing-pay-panel"><div className="cw-panel-head"><div><h2>Payment details</h2><p>Pay through your agreed OshaHub payment channel, then submit the receipt for verification.</p></div></div><div className="cw-billing-pay-fields"><label className="cw-form-label">PAYMENT METHOD<select value={method} onChange={(event)=>setMethod(event.target.value)}><option value="M-PESA">M-Pesa</option><option value="BANK TRANSFER">Bank transfer</option><option value="CARD">Card</option><option value="CASH">Cash</option></select></label><label className="cw-form-label">TRANSACTION / RECEIPT REFERENCE<input required minLength="4" maxLength="120" value={reference} onChange={(event)=>setReference(event.target.value)} placeholder="e.g. M-Pesa receipt code"/></label><button className="cw-primary" disabled={busy||Boolean(billing?.pendingRequest)||!reference.trim()} onClick={()=>submit({type:'PLAN_PURCHASE',planId:selectedPlan,method,reference})}>{busy?'Sending…':billing?.pendingRequest?'Request pending':'Submit payment for verification'} <ArrowRight size={15}/></button></div><p className="cw-billing-hint">Your plan becomes active after an OshaHub administrator verifies the payment. The confirmation and receipt will appear below.</p></section>}
+    <section className="cw-panel cw-table-panel cw-billing-history"><div className="cw-panel-head"><div><h2>Confirmed payments</h2><p>Your subscription payment report.</p></div><button className="cw-secondary" disabled={!payments.length} onClick={downloadReport}><Download size={15}/> Download CSV</button></div><div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>DATE</th><th>PLAN</th><th>AMOUNT</th><th>METHOD</th><th>REFERENCE</th><th>STATUS</th></tr></thead><tbody>{payments.map((payment)=><tr key={payment.id}><td>{new Date(payment.paid_at).toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'})}</td><td>{plans.find((item)=>item.id===payment.plan_id)?.name||'Subscription'}</td><td>{formatKes(payment.amount_kes)}</td><td>{payment.method}</td><td>{payment.external_reference||'—'}</td><td><StatusPill status="PAID"/></td></tr>)}</tbody></table>{!payments.length&&<EmptyPanel title="No confirmed subscription payments yet" text="Once your payment is verified, its receipt and plan details will appear here."/>}</div></section>
+  </>;
+}
 
 function AuditPage({rows}){return <><PageHeading title="Audit & security" subtitle="Recent operational events and sensitive account activity."/><div className="cw-security-banner"><ShieldCheck size={23}/><span><b>Tenant isolation is enforced</b><small>Business records are scoped to the signed in workspace.</small></span><StatusPill status="ACTIVE"/></div><div className="cw-panel cw-table-panel"><div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>EVENT</th><th>DETAIL</th><th>TIME</th><th>RESULT</th></tr></thead><tbody>{rows.map((row)=><tr key={row.id}><td><b>{row.action}</b></td><td>{row.detail}</td><td>{row.time}</td><td><span className="cw-pay-state paid"><CheckCircle2 size={13}/> Recorded</span></td></tr>)}</tbody></table></div></div></>}
 
