@@ -7,3 +7,9 @@
 
 /* Keep long admin lists to roughly ten visible rows with a sticky header. */
 .pa-table-wrap{max-height:min(620px,calc(100vh - 250px));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.pa-table-wrap table thead{position:sticky;top:0;z-index:2}.pa-table-wrap table thead th{background:#f9fafc}
+
+.pa-plan-table table{min-width:980px}.pa-plan-table th:last-child,.pa-plan-table td:last-child{position:sticky;right:0;min-width:132px;background:#fff;box-shadow:-8px 0 12px -12px #26382b;z-index:1}.pa-plan-table thead th:last-child{z-index:4;background:#f9fafc}.pa-plan-table td input{width:132px;max-width:18vw;min-width:90px}.pa-plan-table .pa-actions{gap:7px}.pa-plan-table .pa-actions button{min-height:30px;padding:0 10px;border:1px solid #dfe7e0;border-radius:6px;background:#168b40;color:#fff;font-size:10px;font-weight:700}.pa-plan-table .pa-actions button.pa-cancel{background:#fff;color:#516154}
+
+.pa-tenant-table th:last-child,.pa-tenant-table td:last-child{position:sticky;right:0;min-width:112px;background:#fff;box-shadow:-8px 0 12px -12px #26382b;z-index:1}.pa-tenant-table thead th:last-child{z-index:4;background:#fafcfa}.pa-tenant-table .pa-actions button.pa-cancel{background:#fff;color:#516154}
+
+.pa-tenant-table .pa-actions button{min-height:29px;padding:0 9px;border:1px solid #dfe7e0;border-radius:6px;background:#168b40;color:#fff;font-size:9px;font-weight:700}.pa-tenant-table .pa-actions button:last-child{background:#fff;color:#516154}
