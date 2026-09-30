@@ -263,7 +263,7 @@ function RequestTable({ requests, onReview, busy, selectable = false, selectedId
     <table>
       <thead><tr>{selectable && <th aria-label="Select"/>}<th>BUSINESS</th><th>OWNER</th><th>PHONE</th><th>STATUS</th><th>RECEIVED</th><th>ACTION</th></tr></thead>
       <tbody>{requests.map((request) => <tr key={request.id}>
-        {selectable && <td><input aria-label={`Select ${request.tenant_name}`} type="checkbox" checked={selectedIds.includes(request.id)} onChange={() => onToggle(request.id)}/></td>}
+        {selectable && <td><input aria-label={`Select ${request.tenant_name}`} type="checkbox" checked={selectedIds.includes(request.id)} disabled={busy||(!selectedIds.includes(request.id)&&selectedIds.length>=250)} onChange={() => onToggle(request.id)}/></td>}
         <td><b>{request.tenant_name}</b></td><td>{request.owner_name}</td><td>{request.phone}</td><td><StatusPill status={request.status}/></td><td>{date(request.created_at)}</td>
         <td>{['PENDING', 'REJECTED'].includes(request.status) ? <div className="pa-actions">
           <button className="approve" disabled={busy} onClick={() => onReview(request.id, true)}>{request.status === 'REJECTED' ? 'Re-approve' : 'Approve'}</button>
