@@ -681,7 +681,27 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange}){
   const [name,setName]=useState(db.settings.businessName);
   const [branch,setBranch]=useState(db.settings.branch);
   const [rate,setRate]=useState(String(db.settings.loyaltyRate));
+  const [accountEmail,setAccountEmail]=useState(user?.email||'');
+  const [newPassword,setNewPassword]=useState('');
+  const [confirmPassword,setConfirmPassword]=useState('');
+  const [accountBusy,setAccountBusy]=useState(false);
+  const [accountMessage,setAccountMessage]=useState('');
+  const [accountError,setAccountError]=useState('');
   const isBusinessAdmin=role==='Business Admin';
+  async function updateAccount(event){
+    event.preventDefault();setAccountMessage('');setAccountError('');
+    const emailChanged=accountEmail.trim().toLowerCase()!==(user?.email||'').toLowerCase();
+    if(!emailChanged&&!newPassword){setAccountError('Enter a new email address or password first.');return;}
+    if(newPassword&&newPassword.length<8){setAccountError('Use a password with at least 8 characters.');return;}
+    if(newPassword!==confirmPassword){setAccountError('The new passwords do not match.');return;}
+    const updates={};if(emailChanged)updates.email=accountEmail.trim();if(newPassword)updates.password=newPassword;
+    setAccountBusy(true);
+    const {error}=await supabaseBrowser.auth.updateUser(updates);
+    setAccountBusy(false);
+    if(error){setAccountError(error.message);return;}
+    setNewPassword('');setConfirmPassword('');
+    setAccountMessage(emailChanged?'Check your new email address for a confirmation link. The change takes effect after you confirm it.':'Your password has been changed.');
+  }
   return <>
     <PageHeading title={isBusinessAdmin?'Business settings':'Workspace settings'} subtitle={isBusinessAdmin?'Manage your business details, loyalty rules and workspace preferences.':'Manage your account preferences and washer workspace appearance.'}/>
     <div className="cw-settings-grid">
@@ -692,6 +712,7 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange}){
         <label className="cw-form-label">LOYALTY EARN RATE<input type="number" min="0" value={rate} onChange={(event)=>setRate(event.target.value)}/><small>Points awarded for each KES spent on a closed order.</small></label>
         <button className="cw-primary" onClick={()=>onSave({businessName:name,branch,loyaltyRate:Math.max(0,K(rate))})}>Save business settings <Check size={16}/></button>
       </div>}
+      <section className="cw-panel cw-settings-panel cw-account-security"><div className="cw-panel-head"><div><h2>Sign-in and security</h2><p>Update the email or password for your own OshaHub account.</p></div></div><form onSubmit={updateAccount}><label className="cw-form-label">ACCOUNT EMAIL<input type="email" autoComplete="email" required value={accountEmail} onChange={(event)=>setAccountEmail(event.target.value)}/><small>We’ll send a confirmation link before changing your sign-in email.</small></label><label className="cw-form-label">NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={newPassword} onChange={(event)=>setNewPassword(event.target.value)} placeholder="Leave blank to keep your current password"/></label><label className="cw-form-label">CONFIRM NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={confirmPassword} onChange={(event)=>setConfirmPassword(event.target.value)} placeholder="Enter the new password again"/></label>{accountError&&<p className="cw-account-feedback error" role="alert">{accountError}</p>}{accountMessage&&<p className="cw-account-feedback success" role="status">{accountMessage}</p>}<button className="cw-primary" disabled={accountBusy}>{accountBusy?'Updating account…':'Update sign-in details'} <Check size={16}/></button></form></section>
       <div className="cw-panel cw-info-panel"><ShieldCheck size={22}/><h3>Account and workspace</h3><p>Your access is limited to the work assigned to your OshaHub role.</p><div><span>Business</span><b>{db.settings.businessName}</b></div><div><span>Signed in as</span><b>{user?.email||user?.name||'OshaHub team member'}</b></div><div><span>Workspace role</span><b>{role}</b></div>{isBusinessAdmin&&<div><span>Subscription</span><b>{db.billing?.currentSubscription?.status||db.tenants[0]?.status||'ACTIVE'}</b></div>}</div>
       <section className="cw-panel cw-appearance-panel"><div className="cw-panel-head"><div><h2>Appearance</h2><p>Choose the workspace colors that suit your screen.</p></div></div><div className="cw-theme-options"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><span className="cw-theme-preview light"><Sun size={20}/><i/><i/><i/></span><span><b>Light</b><small>Bright background</small></span>{theme==='light'&&<CheckCircle2 size={17}/>}</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><span className="cw-theme-preview dark"><Moon size={20}/><i/><i/><i/></span><span><b>Dark</b><small>Low-light workspace</small></span>{theme==='dark'&&<CheckCircle2 size={17}/>}</button></div><p className="cw-appearance-note">Appearance syncs to your OshaHub account and is applied in this browser.</p></section>
     </div>

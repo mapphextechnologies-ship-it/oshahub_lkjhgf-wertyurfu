@@ -6,6 +6,7 @@ const EMPTY_DATA = { tenants: [], requests: [], plans: [], subscriptions: [], su
 
 export default function SuperAdminApp() {
   const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [section, setSection] = useState('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -27,21 +28,21 @@ export default function SuperAdminApp() {
   useEffect(() => { setAdminName(session?.membership.full_name || ''); }, [session?.membership.full_name]);
 
   useEffect(() => {
-    if (!supabaseBrowser) return undefined;
+    if (!supabaseBrowser) { setAuthLoading(false); return undefined; }
     let active = true;
     supabaseBrowser.auth.getSession().then(async ({ data, error: sessionError }) => {
       if (!active) return;
-      if (sessionError) { setError(sessionError.message); return; }
+      if (sessionError) { setError(sessionError.message); setAuthLoading(false); return; }
       const user = data.session?.user;
-      if (!user) return;
+      if (!user) { setAuthLoading(false); return; }
       const { data: memberships, error: membershipError } = await supabaseBrowser.from('carwash_memberships')
         .select('id,role,tenant_id,full_name,status').eq('user_id', user.id).eq('role', 'SUPER_ADMIN').eq('status', 'ACTIVE').is('tenant_id', null).limit(1);
       if (!active) return;
-      if (membershipError) { setError(membershipError.message); return; }
-      const membership = memberships?.[0];
-      if (membership) setSession({ user, membership });
+      if (membershipError) setError(membershipError.message);
+      else if (memberships?.[0]) setSession({ user, membership: memberships[0] });
       else setError('This signed-in account does not have an active Super Admin membership.');
-    });
+      setAuthLoading(false);
+    }).catch((sessionError) => { if (active) { setError(sessionError.message || 'Unable to restore your administrator session.'); setAuthLoading(false); } });
     return () => { active = false; };
   }, []);
 
@@ -170,6 +171,7 @@ export default function SuperAdminApp() {
     else setSidebarCollapsed(true);
   }
 
+  if (authLoading) return <AdminAuthLoading/>;
   if (!session) return <AdminSignIn email={email} setEmail={setEmail} password={password} setPassword={setPassword} onSubmit={signIn} busy={busy} error={error} />;
 
   const pending = data.requests.filter((request) => request.status === 'PENDING');
@@ -222,6 +224,8 @@ export default function SuperAdminApp() {
         {activationTenant&&<div className="pa-drawer-backdrop" onMouseDown={(event)=>{if(event.target===event.currentTarget)setActivationTenant(null);}}><aside className="pa-drawer"><header><div><span>PAYMENT CONFIRMATION</span><h2>{activationTenant.tenant_name||activationTenant.name}</h2><p>{activationTenant.owner_name}</p></div><button className="pa-drawer-close" type="button" onClick={()=>setActivationTenant(null)} aria-label="Close"><X size={18}/></button></header><form onSubmit={confirmPlanActivation}><div className="pa-drawer-plan"><small>PLAN TO ACTIVATE</small><strong>{activationTenant.selectedPlan?.name}</strong><span>Plan KES {money(activationTenant.selectedPlan?.price_kes)} · {activationTenant.selectedPlan?.duration_days} days</span><label>Business branches<input type="number" min="1" max="100" value={activationTenant.selectedPlan?.branchCount||1} onChange={(event)=>setActivationTenant((old)=>{const count=Math.max(1,Math.min(100,Number(event.target.value)||1));const onboardingFee=data.subscriptionPayments.some((payment)=>payment.tenant_id===old.id)?0:8500*count;return {...old,selectedPlan:{...old.selectedPlan,branchCount:count,onboardingFee,totalDue:Number(old.selectedPlan.price_kes)+onboardingFee}}})}/></label><span>One-time onboarding · KES 8,500 per branch: KES {money(activationTenant.selectedPlan?.onboardingFee)}</span><strong>Total due KES {money(activationTenant.selectedPlan?.totalDue)}</strong></div><label>Payment method<select value={paymentMethod} onChange={(event)=>setPaymentMethod(event.target.value)}><option value="M-PESA">M-Pesa</option><option value="CASH">Cash</option><option value="CARD">Card</option><option value="BANK TRANSFER">Bank transfer</option></select></label><label>Payment reference <span>Optional</span><input value={paymentReference} onChange={(event)=>setPaymentReference(event.target.value)} placeholder="M-Pesa code or receipt number"/></label><p className="pa-drawer-note">Confirm only after the full total has reached OshaHub. The one-time KES 8,500 onboarding fee applies per branch on a business’s first paid plan.</p><button className="pa-primary" disabled={busy}><Check size={16}/>{busy?'Recording payment…':'Confirm payment and activate'}</button></form></aside></div>}
   </div>;
 }
+
+function AdminAuthLoading() { return <main className="pa-auth-loading" role="status" aria-live="polite"><img src="/osha-hub-logo.svg" alt="OshaHub"/><h1>Restoring your secure session…</h1><p>Connecting to the platform console</p><div><i/></div></main>; }
 
 function AdminSignIn({ email, setEmail, password, setPassword, onSubmit, busy, error }) {
   return <main className="pa-login"><section className="pa-login-brand"><a href="/"><img src="/osha-hub-logo.svg" alt="OshaHub"/></a><span>PLATFORM OWNER CONSOLE</span><h1>One platform.<br/>Every car wash.</h1><p>Review tenant applications, manage platform access and oversee subscriptions from a private administrator workspace.</p><div><ShieldCheck size={16}/> ACCESS RESTRICTED TO PLATFORM ADMINS</div></section><section className="pa-login-form-wrap"><form className="pa-login-form" onSubmit={onSubmit}><span className="pa-kicker">SUPER ADMINISTRATION</span><h2>Super Admin sign in</h2><p>Use the platform owner account assigned to you.</p><label>Email address<input type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@yourbusiness.com"/></label><label>Password<input type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password"/></label><button disabled={busy || !supabaseBrowser}>{busy ? 'Signing in…' : 'Sign in to platform'}</button>{!supabaseBrowser && <div className="pa-feedback error"><CircleAlert size={16}/><span>Supabase is not configured. {supabaseConfigMessage}</span></div>}{error && <div className="pa-feedback error"><CircleAlert size={16}/><span>{error}</span></div>}<small>OshaHub platform administration · Authorized accounts only</small></form></section></main>;
