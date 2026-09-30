@@ -1,5 +1,16 @@
 -- Carwash OS core schema (Supabase / PostgreSQL)
 -- Business rows always carry tenant_id. Membership is the source of tenant context.
+-- Restore the SQL connection's owner role if a temporary SET ROLE was used.
+reset role;
+do $$
+begin
+  if not has_schema_privilege(current_user, 'public', 'CREATE') then
+    raise exception 'Role % (session role %) cannot create objects in public. Run carwash.sql in Supabase Dashboard SQL Editor as postgres or the public schema owner.', current_user, session_user
+      using errcode = '42501';
+  end if;
+end;
+$$;
+
 create extension if not exists pgcrypto;
 revoke create on schema public from public,anon,authenticated;
 -- Keep owner-run migrations able to create schema objects without granting
