@@ -21,10 +21,10 @@ const ROLE_NAV = {
     ['overview','Overview',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['services','Services & pricing',Sparkles],['staff','Staff',Users],['payments','Payments',CreditCard],['commissions','Commissions',CircleDollarSign],['loyalty','Loyalty',BadgeCheck],['reports','Reports',FileBarChart2],['plans-billing','Plans & billing',Wallet],['settings','Settings',Settings]
   ],
   Receptionist: [
-    ['overview','Today’s operations',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['payments','Payments',CreditCard]
+    ['overview','Today’s operations',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['payments','Payments',CreditCard],['settings','Settings',Settings]
   ],
   Washer: [
-    ['overview','My jobs',LayoutDashboard],['jobs','Assigned jobs',Waves],['earnings','My earnings',CircleDollarSign],['history','Job history',History]
+    ['overview','My jobs',LayoutDashboard],['jobs','Assigned jobs',Waves],['earnings','My earnings',CircleDollarSign],['history','Job history',History],['settings','Settings',Settings]
   ]
 };
 
@@ -371,7 +371,7 @@ export default function CarWashApp() {
         {screen==='tenants'&&<TenantsPage tenants={db.tenants} onAdd={()=>setModal('tenant')} onChange={(item,status)=>patchDb((next)=>{const row=next.tenants.find((x)=>x.id===item.id);if(row)row.status=status;return next;})}/>}
         {screen==='plans'&&<PlansPage plans={db.plans||[]} tenants={db.tenants} onAdd={()=>setModal('plan')}/>}
         {screen==='audit'&&<AuditPage rows={scoped(db.audit)}/>}
-        {screen==='settings'&&<SettingsPage db={db} theme={theme} onThemeChange={changeTheme} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Run database/migrations/20260929_tenant_settings.sql in the Supabase SQL Editor, then refresh this page.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
+        {screen==='settings'&&<SettingsPage db={db} user={user} role={role} theme={theme} onThemeChange={changeTheme} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Run database/migrations/20260929_tenant_settings.sql in the Supabase SQL Editor, then refresh this page.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
         {screen==='profile'&&<ProfilePage user={user} tenant={tenant} onLogout={logout}/>}
       </section>
     </main>
@@ -677,21 +677,22 @@ function CustomerBillingPage({billing,tenant,onRequest,onRefresh}){
 
 function AuditPage({rows}){return <><PageHeading title="Audit & security" subtitle="Recent operational events and sensitive account activity."/><div className="cw-security-banner"><ShieldCheck size={23}/><span><b>Tenant isolation is enforced</b><small>Business records are scoped to the signed in workspace.</small></span><StatusPill status="ACTIVE"/></div><div className="cw-panel cw-table-panel"><div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>EVENT</th><th>DETAIL</th><th>TIME</th><th>RESULT</th></tr></thead><tbody>{rows.map((row)=><tr key={row.id}><td><b>{row.action}</b></td><td>{row.detail}</td><td>{row.time}</td><td><span className="cw-pay-state paid"><CheckCircle2 size={13}/> Recorded</span></td></tr>)}</tbody></table></div></div></>}
 
-function SettingsPage({db,onSave,theme,onThemeChange}){
+function SettingsPage({db,user,role,onSave,theme,onThemeChange}){
   const [name,setName]=useState(db.settings.businessName);
   const [branch,setBranch]=useState(db.settings.branch);
   const [rate,setRate]=useState(String(db.settings.loyaltyRate));
+  const isBusinessAdmin=role==='Business Admin';
   return <>
-    <PageHeading title="Business settings" subtitle="Manage your business profile and workspace appearance."/>
+    <PageHeading title={isBusinessAdmin?'Business settings':'Workspace settings'} subtitle={isBusinessAdmin?'Manage your business details, loyalty rules and workspace preferences.':'Manage your account preferences and washer workspace appearance.'}/>
     <div className="cw-settings-grid">
-      <div className="cw-panel cw-settings-panel">
+      {isBusinessAdmin&&<div className="cw-panel cw-settings-panel">
         <div className="cw-panel-head"><div><h2>Business profile</h2><p>Workspace identity and branch settings</p></div></div>
         <label className="cw-form-label">BUSINESS NAME<input value={name} onChange={(event)=>setName(event.target.value)}/></label>
         <label className="cw-form-label">PRIMARY BRANCH<input value={branch} onChange={(event)=>setBranch(event.target.value)}/></label>
         <label className="cw-form-label">LOYALTY EARN RATE<input type="number" min="0" value={rate} onChange={(event)=>setRate(event.target.value)}/><small>Points awarded for each KES spent on a closed order.</small></label>
-        <button className="cw-primary" onClick={()=>onSave({businessName:name,branch,loyaltyRate:Math.max(0,K(rate))})}>Save settings <Check size={16}/></button>
-      </div>
-      <div className="cw-panel cw-info-panel"><ShieldCheck size={22}/><h3>Your workspace is tenant scoped</h3><p>Business users see records belonging to their own organization. Role access determines which actions appear in the workspace.</p><div><span>Business</span><b>{db.settings.businessName}</b></div><div><span>Currency</span><b>Kenyan Shilling (KES)</b></div><div><span>Workspace role</span><b>Business Admin</b></div></div>
+        <button className="cw-primary" onClick={()=>onSave({businessName:name,branch,loyaltyRate:Math.max(0,K(rate))})}>Save business settings <Check size={16}/></button>
+      </div>}
+      <div className="cw-panel cw-info-panel"><ShieldCheck size={22}/><h3>Account and workspace</h3><p>Your access is limited to the work assigned to your OshaHub role.</p><div><span>Business</span><b>{db.settings.businessName}</b></div><div><span>Signed in as</span><b>{user?.email||user?.name||'OshaHub team member'}</b></div><div><span>Workspace role</span><b>{role}</b></div>{isBusinessAdmin&&<div><span>Subscription</span><b>{db.billing?.currentSubscription?.status||db.tenants[0]?.status||'ACTIVE'}</b></div>}</div>
       <section className="cw-panel cw-appearance-panel"><div className="cw-panel-head"><div><h2>Appearance</h2><p>Choose the workspace colors that suit your screen.</p></div></div><div className="cw-theme-options"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><span className="cw-theme-preview light"><Sun size={20}/><i/><i/><i/></span><span><b>Light</b><small>Bright background</small></span>{theme==='light'&&<CheckCircle2 size={17}/>}</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><span className="cw-theme-preview dark"><Moon size={20}/><i/><i/><i/></span><span><b>Dark</b><small>Low-light workspace</small></span>{theme==='dark'&&<CheckCircle2 size={17}/>}</button></div><p className="cw-appearance-note">Appearance syncs to your OshaHub account and is applied in this browser.</p></section>
     </div>
   </>;
