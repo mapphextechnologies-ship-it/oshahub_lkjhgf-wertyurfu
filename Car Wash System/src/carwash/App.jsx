@@ -114,6 +114,22 @@ export default function CarWashApp() {
     return()=>{active=false;};
   },[user?.authUserId,user?.tenant_id]);
   useEffect(()=>{
+    const pending=db.billing?.pendingRequest;
+    if(!user?.authUserId||!user.tenant_id||pending?.request_type!=='PLAN_PURCHASE'||pending.mpesa_payment_status==='FAILED'||pending.mpesa_payment_status==='PAID')return undefined;
+    let active=true;let timer;
+    const checkPayment=async()=>{
+      const {data,error}=await supabaseBrowser.from('carwash_billing_requests').select('status,mpesa_payment_status').eq('id',pending.id).maybeSingle();
+      if(!active||error||!data)return;
+      if(data.mpesa_payment_status==='PAID'||data.status==='APPROVED'){
+        try{const {db:liveDb}=await loadLiveWorkspace(user);if(active)setDb(liveDb);}catch{}
+        return;
+      }
+      timer=window.setTimeout(checkPayment,5000);
+    };
+    timer=window.setTimeout(checkPayment,5000);
+    return()=>{active=false;window.clearTimeout(timer);};
+  },[user?.authUserId,user?.tenant_id,db.billing?.pendingRequest?.id,db.billing?.pendingRequest?.request_type,db.billing?.pendingRequest?.status,db.billing?.pendingRequest?.mpesa_payment_status]);
+  useEffect(()=>{
     if(!user?.authUserId)return;
     let active=true;
     const refresh=()=>supabaseBrowser.from('carwash_user_messages').select('id,kind,subject,body,read_at,created_at,reference_key').eq('user_id',user.authUserId).order('created_at',{ascending:false}).limit(50)
@@ -332,7 +348,7 @@ export default function CarWashApp() {
       <div className="cw-workspace"><div className="cw-workspace-mark"><Store size={16}/></div><div className="cw-workspace-copy"><b>{role==='SaaS Super Admin'?'Platform owner':tenant?.name||db.settings.businessName}</b><span>{ROLE_COPY[role]}</span></div><ChevronDown size={15}/></div>
       <div className="cw-nav-label">WORKSPACE</div>
       <nav className="cw-nav">{myNav.map(([key,label,Icon])=><button key={key} className={`cw-nav-item ${screen===key?'active':''}`} onClick={()=>navigate(key)}><Icon size={18}/><span>{label}</span>{key==='jobs'&&activeCount>0&&<i>{activeCount}</i>}</button>)}</nav>
-      <div className="cw-sidebar-bottom"><div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div><button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
+      <div className="cw-sidebar-bottom"><div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div><button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
     </aside>
     {!menuOpen&&<button className="cw-icon-button cw-mobile-open" onClick={()=>setMenuOpen(true)} aria-label="Open side menu"><Menu size={19}/></button>}
     {menuOpen&&<button className="cw-mobile-scrim" onPointerDown={()=>setMenuOpen(false)} onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
