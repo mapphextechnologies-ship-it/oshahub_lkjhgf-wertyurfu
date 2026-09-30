@@ -16,7 +16,7 @@ alter table public.carwash_billing_requests
   add column if not exists onboarding_fee_kes numeric(12,2) not null default 0;
 update public.carwash_billing_requests r
 set plan_amount_kes=p.price_kes,
-    onboarding_fee_kes=case when not exists(select 1 from public.carwash_subscription_payments x where x.tenant_id=r.tenant_id) then 5000 else 0 end
+    onboarding_fee_kes=case when not exists(select 1 from public.carwash_subscription_payments x where x.tenant_id=r.tenant_id) then 8500 else 0 end
 from public.carwash_plans p
 where r.plan_id=p.id and r.request_type='PLAN_PURCHASE' and r.status='PENDING';
 
@@ -39,7 +39,7 @@ begin
     if p_payment_method not in ('M-PESA','BANK TRANSFER','CARD','CASH') or length(trim(coalesce(p_payment_reference,''))) not between 4 and 120 then
       raise exception 'Enter the payment method and transaction/reference number.' using errcode='22023';
     end if;
-    if not exists(select 1 from public.carwash_subscription_payments where tenant_id=actor.tenant_id) then setup_fee:=5000; end if;
+    if not exists(select 1 from public.carwash_subscription_payments where tenant_id=actor.tenant_id) then setup_fee:=8500; end if;
   end if;
   select * into current_sub from public.carwash_subscriptions where tenant_id=actor.tenant_id order by starts_at desc,created_at desc limit 1;
   if p_request_type='TRIAL_EXTENSION' and (not found or current_sub.status not in ('TRIAL','EXPIRED') or exists(select 1 from public.carwash_subscription_payments where tenant_id=actor.tenant_id)) then
@@ -108,7 +108,7 @@ begin
   if not found then raise exception 'Business account not found.' using errcode='P0002'; end if;
   select * into plan_row from public.carwash_plans where id=target_plan and active;
   if not found then raise exception 'Choose an active subscription plan.' using errcode='22023'; end if;
-  if not exists(select 1 from public.carwash_subscription_payments where tenant_id=target_tenant) then setup_fee:=5000; end if;
+  if not exists(select 1 from public.carwash_subscription_payments where tenant_id=target_tenant) then setup_fee:=8500; end if;
   insert into public.carwash_subscriptions(tenant_id,plan_id,starts_at,ends_at,status,auto_renew) values(target_tenant,target_plan,now(),now()+make_interval(days=>plan_row.duration_days),'ACTIVE',false) returning * into subscription_row;
   insert into public.carwash_subscription_payments(tenant_id,subscription_id,plan_id,amount_kes,plan_amount_kes,onboarding_fee_kes,method,external_reference,confirmed_by)
     values(target_tenant,subscription_row.id,target_plan,plan_row.price_kes+setup_fee,plan_row.price_kes,setup_fee,payment_method,nullif(trim(payment_reference),''),auth.uid());
