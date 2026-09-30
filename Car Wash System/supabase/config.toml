@@ -1,0 +1,2 @@
+[functions.mpesa-stk]
+verify_jwt = false
