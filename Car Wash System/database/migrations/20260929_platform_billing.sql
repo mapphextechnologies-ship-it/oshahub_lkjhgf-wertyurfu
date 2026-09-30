@@ -23,9 +23,9 @@ $$;
 -- Existing plan prices and feature settings are preserved on reruns.
 insert into public.carwash_plans (name, price_kes, duration_days, feature_flags, active)
 values
-  ('Starter', 2900, 30, '{"branches":1,"staff":3,"description":"Core operations"}'::jsonb, true),
-  ('Growth', 4900, 30, '{"branches":3,"staff":15,"description":"Reports and loyalty"}'::jsonb, true),
-  ('Enterprise', 9900, 30, '{"branches":-1,"staff":-1,"description":"Priority support"}'::jsonb, true)
+  ('Starter', 3900, 30, '{"branches":1,"staff":3,"description":"Core operations"}'::jsonb, true),
+  ('Growth', 7900, 30, '{"branches":3,"staff":15,"description":"Reports and loyalty"}'::jsonb, true),
+  ('Enterprise', 14900, 30, '{"branches":-1,"staff":-1,"description":"Priority support"}'::jsonb, true)
 on conflict (name) do nothing;
 
 create table if not exists public.carwash_subscription_payments (
