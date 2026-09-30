@@ -1,6 +1,18 @@
 -- Restore the platform-only RPC used to clear selected pending/rejected
 -- business registration requests. Keep access restricted to authenticated
 -- Super Admins and refresh PostgREST's function schema cache after creation.
+-- Restore the connection's original owner role if a temporary SET ROLE was used.
+reset role;
+
+do $$
+begin
+  if not has_schema_privilege(current_user, 'public', 'CREATE') then
+    raise exception 'Role % (session role %) cannot create functions in public. Run this in the Supabase Dashboard SQL Editor as postgres or the public schema owner.', current_user, session_user
+      using errcode = '42501';
+  end if;
+end;
+$$;
+
 create or replace function public.carwash_delete_business_requests(p_request_ids uuid[])
 returns integer
 language plpgsql
