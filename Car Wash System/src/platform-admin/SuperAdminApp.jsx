@@ -111,7 +111,7 @@ export default function SuperAdminApp() {
     if (!requestIds.length || !window.confirm(`Delete ${requestIds.length} selected business request${requestIds.length === 1 ? '' : 's'}? This does not delete an approved business account.`)) return;
     setBusy(true); setError(''); setNotice('');
     const { data: deleted, error: deleteError } = await supabaseBrowser.rpc('carwash_delete_business_requests', { p_request_ids: requestIds });
-    if (deleteError) setError(deleteError.message);
+    if (deleteError) setError(deleteError.code === 'PGRST202' ? 'The database is missing this Super Admin request-cleanup function. Apply database/migrations/20260930_platform_request_cleanup.sql in Supabase, then retry.' : deleteError.message);
     else { setSelectedRequests([]); setNotice(`${deleted} request${deleted === 1 ? '' : 's'} deleted.`); await loadData(); }
     setBusy(false);
   }

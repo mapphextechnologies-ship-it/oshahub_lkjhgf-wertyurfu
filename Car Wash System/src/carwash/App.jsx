@@ -37,10 +37,15 @@ const ROLE_COPY = {
 const NAV_TITLES = Object.fromEntries(Object.values(ROLE_NAV).flatMap((items)=>items.map(([key,label])=>[key,label])));
 const K = (value) => Number(value || 0);
 const shortTime = () => new Intl.DateTimeFormat('en-KE',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
+const IDLE_LOGOUT_MS = 30 * 60 * 1000;
+const activityKey = (userId) => `osha-cw-last-activity:${userId}`;
 
 export default function CarWashApp() {
   const [db, setDb] = useState(readDb);
   const [user, setUser] = useState(() => supabaseBrowser ? null : getSession());
+  const [authLoading, setAuthLoading] = useState(Boolean(supabaseBrowser));
+  const [authRestoreError, setAuthRestoreError] = useState('');
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const inviteLink = new URLSearchParams(window.location.search).has('invite');
   const initialAuthRoute=window.location.hash.match(/^#\/(login|register)(?:\?.*)?$/)?.[1];
   const [showLogin, setShowLogin] = useState(()=>inviteLink||Boolean(initialAuthRoute)||window.sessionStorage.getItem('cw-auth-view')==='login');
@@ -59,16 +64,28 @@ export default function CarWashApp() {
 
   useEffect(()=>{ clearLegacyBrowserData(); },[]);
   useEffect(()=>{
-    if(!supabaseBrowser)return;
+    if(!supabaseBrowser){setAuthLoading(false);return undefined;}
     let active=true;
-    supabaseBrowser.auth.getSession().then(async({data,error})=>{
-      if(!active||error||!data.session?.user)return;
+    const restore=async()=>{
+      setAuthLoading(true);setAuthRestoreError('');
       try{
-        const authUser=data.session.user;
+        const {data,error}=await supabaseBrowser.auth.getSession();
+        if(error)throw error;
+        if(!active)return;
+        const authUser=data.session?.user;
+        if(!authUser)return;
+        const key=activityKey(authUser.id);
+        const lastActivity=Number(window.localStorage.getItem(key)||0);
+        if(lastActivity&&Date.now()-lastActivity>=IDLE_LOGOUT_MS){
+          await supabaseBrowser.auth.signOut();
+          window.localStorage.removeItem(key);clearSession();setUser(null);setShowLogin(false);window.location.hash='/';
+          return;
+        }
+        if(!lastActivity)window.localStorage.setItem(key,String(Date.now()));
         const {data:memberships,error:membershipError}=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role').limit(10);
         if(membershipError)throw membershipError;
         const membership=(memberships||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role));
-        if(!membership){if(active)setShowLogin(true);return;}
+        if(!membership){await supabaseBrowser.auth.signOut();window.localStorage.removeItem(key);setShowLogin(true);setAuthRestoreError('This account has no active business workspace membership. Sign in with an approved business or staff account.');return;}
         const role=({BUSINESS_ADMIN:'Business Admin',RECEPTIONIST:'Receptionist',WASHER:'Washer'})[membership.role];
         const {data:tenant,error:tenantError}=await supabaseBrowser.from('carwash_tenants').select('name').eq('id',membership.tenant_id).single();
         if(tenantError)throw tenantError;
@@ -78,10 +95,12 @@ export default function CarWashApp() {
         const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
         if(messageError)throw messageError;
         if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch,billingRestricted:canOperate===false,activationMessage:messages?.[0]?.body};saveSession(session);setUser(session);}
-      }catch(error){if(active){setShowLogin(true);setToast(error.message||'Unable to reconnect your workspace.');}}
-    });
+      }catch(error){if(active)setAuthRestoreError(error.message||'Unable to reconnect your workspace. Check your connection and retry.');}
+      finally{if(active)setAuthLoading(false);}
+    };
+    restore();
     return()=>{active=false;};
-  },[]);
+  },[restoreAttempt]);
   useEffect(()=>{
     if(!user?.authUserId||!user.tenant_id)return;
     let active=true; setLiveLoading(true); setLiveError('');
@@ -96,6 +115,25 @@ export default function CarWashApp() {
     refresh();
     const timer=window.setInterval(refresh,30000);
     return()=>{active=false;window.clearInterval(timer);};
+  },[user?.authUserId]);
+  useEffect(()=>{
+    if(!user?.authUserId)return undefined;
+    const key=activityKey(user.authUserId);
+    const updateActivity=()=>window.localStorage.setItem(key,String(Date.now()));
+    const expireIfIdle=()=>{
+      const lastActivity=Number(window.localStorage.getItem(key)||Date.now());
+      if(Date.now()-lastActivity<IDLE_LOGOUT_MS)return;
+      window.localStorage.removeItem(key);
+      void supabaseBrowser.auth.signOut().finally(()=>{clearSession();setUser(null);setMenuOpen(false);setModal('');setShowLogin(false);window.location.hash='/';});
+    };
+    if(!window.localStorage.getItem(key))updateActivity();
+    const timer=window.setInterval(expireIfIdle,15000);
+    window.addEventListener('pointerdown',updateActivity,{passive:true});
+    window.addEventListener('keydown',updateActivity);
+    window.addEventListener('touchstart',updateActivity,{passive:true});
+    window.addEventListener('scroll',updateActivity,{passive:true});
+    window.addEventListener('storage',expireIfIdle);
+    return()=>{window.clearInterval(timer);window.removeEventListener('pointerdown',updateActivity);window.removeEventListener('keydown',updateActivity);window.removeEventListener('touchstart',updateActivity);window.removeEventListener('scroll',updateActivity);window.removeEventListener('storage',expireIfIdle);};
   },[user?.authUserId]);
   useEffect(()=>{ if(!toast)return; const id=setTimeout(()=>setToast(''),2700); return()=>clearTimeout(id); },[toast]);
   useEffect(()=>{
@@ -148,7 +186,7 @@ export default function CarWashApp() {
     window.sessionStorage.removeItem('cw-auth-view');window.sessionStorage.removeItem('cw-auth-mode');window.location.hash='/';
     saveSession(session); setUser(session);
   }
-  function logout() { if(supabaseBrowser&&user?.authUserId)supabaseBrowser.auth.signOut(); clearSession(); setUser(null); setModal(''); window.location.hash='/'; }
+  function logout() { if(supabaseBrowser&&user?.authUserId){window.localStorage.removeItem(activityKey(user.authUserId));void supabaseBrowser.auth.signOut();} clearSession(); setUser(null); setModal(''); window.location.hash='/'; }
 
   function updateJob(id, action) {
     const transitions={ assign:['WAITING','ASSIGNED'], start:['ASSIGNED','IN PROGRESS'], complete:['IN PROGRESS','COMPLETED'], ready:['COMPLETED','READY'], deliver:['READY','DELIVERED'], close:['DELIVERED','CLOSED'] };
@@ -262,9 +300,11 @@ export default function CarWashApp() {
     return matches&&(filter==='All'||job.status===filter);
   });
 
+  if(authLoading)return <WorkspaceBootScreen/>;
+  if(authRestoreError)return <WorkspaceBootScreen error={authRestoreError} onRetry={()=>{setAuthRestoreError('');setRestoreAttempt((attempt)=>attempt+1);}} onSignOut={()=>{void supabaseBrowser?.auth.signOut();clearSession();setUser(null);setAuthRestoreError('');setShowLogin(false);window.location.hash='/';}}/>;
   if(!user&&!showLogin)return <PublicLandingPage onLogin={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','login');window.location.hash='/login';setAuthMode('login');setShowLogin(true)}} onRegister={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','register');window.location.hash='/register';setAuthMode('register');setShowLogin(true)}} />;
   if(!user)return <LoginScreen initialMode={authMode} onLogin={login} onBack={()=>{window.sessionStorage.removeItem('cw-auth-view');window.sessionStorage.removeItem('cw-auth-mode');window.sessionStorage.removeItem('cw-auth-scroll');window.location.hash='/';window.scrollTo({top:0,behavior:'instant'});setShowLogin(false)}}/>;
-  if(user.authUserId&&liveLoading)return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">BUSINESS WORKSPACE</span><h1>Loading your wash floor…</h1><p>Connecting your business dashboard to its secure Supabase records.</p></div></div>;
+  if(user.authUserId&&liveLoading)return <WorkspaceBootScreen message="Loading your wash floor…"/>;
   if(user.authUserId&&!user.tenant_id)return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">WORKSPACE ACCESS</span><h1>No business workspace assigned</h1><p>Ask the platform administrator to check your active membership.</p><button className="cw-primary" onClick={logout}>Sign out</button></div></div>;
 
   return <div className="cw-shell">
@@ -302,6 +342,16 @@ export default function CarWashApp() {
     {modal&&<FormModal type={modal} db={db} tenantId={tenantId} onClose={()=>setModal('')} onSubmit={submitModal}/>}
     {!!toast&&<div className="cw-toast"><CheckCircle2 size={18}/>{toast}</div>}
   </div>;
+}
+
+function WorkspaceBootScreen({message='Restoring your workspace…',error='',onRetry,onSignOut}){
+  return <main className="cw-wash-loader" role="status" aria-live="polite">
+    <div className="cw-loader-logo"><Droplets size={22}/><b>OSHA<i>HUB</i></b></div>
+    <div className="cw-loader-car"><CarFront size={76}/><i className="cw-loader-spray"/></div>
+    <h2>{error?'Workspace connection paused':message}</h2>
+    <p>{error||'Restoring your secure sign-in and last workspace page'}</p>
+    {error?<div className="cw-boot-actions"><button className="cw-primary" onClick={onRetry}>Retry connection</button><button className="cw-secondary" onClick={onSignOut}>Sign out and return home</button></div>:<div className="cw-loader-track"><i/></div>}
+  </main>;
 }
 
 function PublicLandingPage({onLogin,onRegister}){
