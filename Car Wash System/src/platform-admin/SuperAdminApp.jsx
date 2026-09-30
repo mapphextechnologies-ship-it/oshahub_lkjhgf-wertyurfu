@@ -165,7 +165,7 @@ export default function SuperAdminApp() {
   }
 
   function handleOutsidePointerDown(event) {
-    if (event.target.closest?.('.pa-sidebar, .pa-menu-toggle')) return;
+    if (event.target.closest?.('.pa-sidebar, .pa-sidebar-toggle, .pa-mobile-open')) return;
     if (window.matchMedia('(max-width: 680px)').matches) setMenuOpen(false);
     else setSidebarCollapsed(true);
   }
@@ -183,7 +183,7 @@ export default function SuperAdminApp() {
 
   return <div className={`pa-shell ${sidebarCollapsed?'is-collapsed':''} ${menuOpen?'menu-open':''}`} onPointerDownCapture={handleOutsidePointerDown}>
     <aside className="pa-sidebar">
-      <a className="pa-brand" href="/"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span>PLATFORM CONTROL</span></a>
+      <div className="pa-sidebar-head"><a className="pa-brand" href="/"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span>PLATFORM CONTROL</span></a><button className="pa-sidebar-toggle" onClick={()=>{if(window.matchMedia('(max-width: 680px)').matches)setMenuOpen(false);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={menuOpen?'Close side menu':sidebarCollapsed?'Expand side menu':'Collapse side menu'} aria-expanded={window.matchMedia('(max-width: 680px)').matches?menuOpen:!sidebarCollapsed}>{menuOpen?<X size={19}/>:<Menu size={19}/>}</button></div>
       <div className="pa-nav-label">ADMINISTRATION</div>
       <nav onClick={() => setMenuOpen(false)}>
         {[["overview", "Overview", LayoutDashboard], ["requests", "Business requests", ArrowDownToLine], ["businesses", "Businesses", Building2], ["plans", "Plans & billing", CreditCard]].map(([key, label, Icon]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}><Icon size={18}/><span>{label}</span>{key === 'requests' && pending.length > 0 && <i>{pending.length}</i>}</button>)}
@@ -192,8 +192,9 @@ export default function SuperAdminApp() {
       <div className="pa-side-bottom"><div className="pa-secure"><ShieldCheck size={17}/><span><b>Restricted access</b><small>Platform owner account</small></span></div><button className="pa-signout" onClick={signOut}><LogOut size={17}/> Sign out</button></div>
     </aside>
     {menuOpen&&<button className="pa-scrim" onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
+    {!menuOpen&&<button className="pa-mobile-open" onClick={()=>setMenuOpen(true)} aria-label="Open side menu"><Menu size={19}/></button>}
     <main className="pa-main">
-      <header className="pa-topbar"><button className="pa-menu-toggle" onClick={()=>{if(window.matchMedia('(max-width: 680px)').matches)setMenuOpen((open)=>!open);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label="Toggle navigation" aria-expanded={window.matchMedia('(max-width: 680px)').matches?menuOpen:!sidebarCollapsed}><Menu size={19}/></button><div className="pa-crumb"><span>OSHAHUB / PLATFORM</span><ChevronRight size={14}/><b>{sectionLabel(section)}</b></div><div className="pa-top-actions"><div className="pa-notification-wrap"><button className="pa-bell" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications"><Bell size={18}/>{platformNotices.length>0&&<i>{platformNotices.length>99?'99+':platformNotices.length}</i>}</button>{notificationsOpen&&<div className="pa-notification-panel"><b>Platform notifications</b>{platformNotices.slice(0,30).map((item)=><button key={item.id} onClick={()=>{setSection(item.section);setNotificationsOpen(false);}}><strong>{item.title}</strong><span>{item.detail}</span></button>)}{!platformNotices.length&&<p>All businesses are paid and requests are up to date.</p>}</div>}</div><div className="pa-user"><span className="pa-avatar">{initials(session.membership.full_name)}</span><span><b>{session.membership.full_name}</b><small>SUPER ADMIN</small></span></div></div></header>
+      <header className="pa-topbar"><div className="pa-crumb"><span>OSHAHUB / PLATFORM</span><ChevronRight size={14}/><b>{sectionLabel(section)}</b></div><div className="pa-top-actions"><div className="pa-notification-wrap"><button className="pa-bell" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications"><Bell size={18}/>{platformNotices.length>0&&<i>{platformNotices.length>99?'99+':platformNotices.length}</i>}</button>{notificationsOpen&&<div className="pa-notification-panel"><b>Platform notifications</b>{platformNotices.slice(0,30).map((item)=><button key={item.id} onClick={()=>{setSection(item.section);setNotificationsOpen(false);}}><strong>{item.title}</strong><span>{item.detail}</span></button>)}{!platformNotices.length&&<p>All businesses are paid and requests are up to date.</p>}</div>}</div><div className="pa-user"><span className="pa-avatar">{initials(session.membership.full_name)}</span><span><b>{session.membership.full_name}</b><small>SUPER ADMIN</small></span></div></div></header>
       <section className="pa-content">
         {notice && <div className="pa-alert success"><Check size={17}/>{notice}<button onClick={() => setNotice('')} aria-label="Dismiss"><X size={16}/></button></div>}
         {error && <div className="pa-alert error"><CircleAlert size={17}/>{error}<button onClick={() => setError('')} aria-label="Dismiss"><X size={16}/></button></div>}
