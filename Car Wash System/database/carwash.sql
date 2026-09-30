@@ -500,7 +500,7 @@ begin
   if not found or not public.carwash_can_operate(target_tenant) then raise exception 'Active business administrator access is required.' using errcode='42501'; end if;
   perform public.carwash_consume_rate_limit('STAFF_INVITE',10,3600);
   normalized_phone:=regexp_replace(coalesce(target_phone,''),'[^0-9+]','','g');
-  if length(regexp_replace(normalized_phone,'[^0-9]','','g')) not between 7 and 15 then raise exception 'Enter a valid WhatsApp phone number.' using errcode='22023'; end if;
+  if length(regexp_replace(normalized_phone,'[^0-9]','','g')) not between 7 and 15 then raise exception 'Enter a valid team member phone number.' using errcode='22023'; end if;
   if target_role is null or target_role not in ('RECEPTIONIST','WASHER') then raise exception 'Choose a staff portal managed by the business.' using errcode='22023'; end if;
   raw_token:=encode(gen_random_bytes(32),'hex');
   insert into public.carwash_staff_invitations(tenant_id,invited_by,phone,role,token_hash)
