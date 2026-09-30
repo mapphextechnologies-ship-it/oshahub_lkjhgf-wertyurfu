@@ -101,9 +101,15 @@ export default function CarWashApp() {
           return;
         }
         if(!lastActivity)window.localStorage.setItem(key,String(Date.now()));
-        const {data:memberships,error:membershipError}=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role').limit(10);
+        const {data:memberships,error:membershipError}=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role').limit(50);
         if(membershipError)throw membershipError;
-        const membership=(memberships||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role));
+        const platformAdmin=(memberships||[]).some((item)=>item.role==='SUPER_ADMIN');
+        if(platformAdmin){await supabaseBrowser.auth.signOut();window.localStorage.removeItem(key);clearSession();setShowLogin(true);setAuthRestoreError('This is a platform administrator account. Sign in at /super-admin.html.');return;}
+        const preferredTenant=window.localStorage.getItem(`cw-active-tenant:${authUser.id}`);
+        const inviteToken=new URLSearchParams(window.location.search).get('invite')||authUser.user_metadata?.invite_token;
+        let membership;
+        if(inviteToken){const {data:invited,error:inviteError}=await supabaseBrowser.rpc('carwash_accept_staff_invitation',{invite_token:inviteToken,staff_name:authUser.user_metadata?.full_name||authUser.email});if(inviteError)throw inviteError;membership=invited;window.localStorage.setItem(`cw-active-tenant:${authUser.id}`,invited.tenant_id);clearStaffInviteFromUrl();void supabaseBrowser.auth.updateUser({data:{invite_token:null}});}
+        else membership=(memberships||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role)&&(!preferredTenant||item.tenant_id===preferredTenant))||(memberships||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role));
         if(!membership){await supabaseBrowser.auth.signOut();window.localStorage.removeItem(key);setShowLogin(true);setAuthRestoreError('This account has no active business workspace membership. Sign in with an approved business or staff account.');return;}
         const role=({BUSINESS_ADMIN:'Business Admin',RECEPTIONIST:'Receptionist',WASHER:'Washer'})[membership.role];
         const {data:tenant,error:tenantError}=await supabaseBrowser.from('carwash_tenants').select('name').eq('id',membership.tenant_id).single();
@@ -231,6 +237,7 @@ export default function CarWashApp() {
     setToast(selected.activationMessage || `${wasUserSeen(selected.email)?'Welcome back':'Welcome'}, ${selected.name.split(' ')[0]}`);
     markUserSeen(selected.email);
     window.sessionStorage.removeItem('cw-auth-view');window.sessionStorage.removeItem('cw-auth-mode');window.location.hash='/';
+    if(session.authUserId&&session.tenant_id)window.localStorage.setItem(`cw-active-tenant:${session.authUserId}`,session.tenant_id);
     saveSession(session); setUser(session);
   }
   function logout() { if(supabaseBrowser&&user?.authUserId){window.localStorage.removeItem(activityKey(user.authUserId));void supabaseBrowser.auth.signOut();} clearSession(); setUser(null); setModal(''); window.location.hash='/'; }
@@ -333,7 +340,7 @@ export default function CarWashApp() {
   }
 
   async function updateSelectedStaff(ids,nextActive){
-    const members=scopedStaff.filter((person)=>ids.includes(person.id)&&((person.status==='Active')!==nextActive));
+    const members=scopedStaff.filter((person)=>['Washer','Receptionist'].includes(person.role)&&ids.includes(person.id)&&((person.status==='Active')!==nextActive));
     if(!members.length){notify('No selected staff members need that access change.');return;}
     if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}
     if(!window.confirm(`${nextActive?'Reactivate':'Deactivate'} access for ${members.length} selected staff member${members.length===1?'':'s'}? Their work history will be retained.`))return;
@@ -548,6 +555,8 @@ const OSHAHUB_TERMS=[['Monthly',1],['3 months',3],['5 months',5],['Yearly',12]];
 function downloadPricingPdf(){window.print()}
 function PricingSheet(){return <section className="cw-pricing-sheet-page"><div className="cw-pricing-sheet-toolbar"><a href="#/pricing"><ArrowRight size={15}/> Back to pricing</a><button type="button" onClick={downloadPricingPdf}><Download size={17}/> Download PDF</button></div><article className="cw-pricing-sheet"><header><img src="/osha-hub-logo.svg" alt="OshaHub"/><div><h1>PRICING GUIDE</h1><p>Subscription plans for your car wash workspace.</p></div></header><h2>SUBSCRIPTION TERMS</h2><div className="cw-pricing-table"><table><thead><tr><th>Plan</th><th>Monthly</th><th>3 months</th><th>5 months</th><th>Yearly</th><th>What’s included</th></tr></thead><tbody>{OSHAHUB_PRICES.map(([plan,price,features],index)=>{const monthly=[3900,7900,14900][index];return <tr key={plan}><td>{plan}</td>{OSHAHUB_TERMS.map(([label,months])=><td key={label}>{formatKes(months===1?monthly:(monthly-300)*months)}</td>)}<td>{features}</td></tr>})}</tbody></table></div><p className="cw-pricing-onboarding-note"><b>One-time onboarding: KES 8,500 per branch.</b> Charged with your first paid plan after the free 7-day trial. Multi-branch setup is priced by branch count.</p><div className="cw-pricing-sheet-notes"><section><h2>TERM SAVINGS</h2><p>Subscriptions of 3, 5 or 12 months save KES 300 for each covered month against the monthly rate.</p></section><section><h2>EVERY PLAN INCLUDES</h2><p>Business workspace, role-based access, wash queue, customer records and mobile-ready operations.</p></section></div></article></section>}
 
+function clearStaffInviteFromUrl(){const url=new URL(window.location.href);if(!url.searchParams.has('invite'))return;url.searchParams.delete('invite');window.history.replaceState({},'',url.toString());}
+
 function LoginScreen({onLogin,onBack,initialMode='login'}){
   const inviteToken=new URLSearchParams(window.location.search).get('invite')||'';
   const [mode,setMode]=useState(()=>inviteToken?'register':initialMode);
@@ -574,24 +583,21 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
   async function openWorkspace(authUser){
     // This app accepts only business and staff memberships. Platform admins
     // authenticate through the standalone console at /super-admin.html.
-    let {data:membership,error:membershipError}=await supabaseBrowser.from('carwash_memberships')
+    const {data:memberships,error:membershipError}=await supabaseBrowser.from('carwash_memberships')
       .select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE')
-      .order('role',{ascending:true}).limit(10);
+      .order('role',{ascending:true}).limit(50);
     if(membershipError)throw membershipError;
-    const platformAdmin=(membership||[]).some((item)=>item.role==='SUPER_ADMIN');
+    const platformAdmin=(memberships||[]).some((item)=>item.role==='SUPER_ADMIN');
     if(platformAdmin){
       setError('This is a platform administrator account. Sign in at /super-admin.html.');
       setBusy(false);
       return;
     }
-    membership=(membership||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role))||null;
-    if(!membership&&authUser.user_metadata?.invite_token){
-      const accepted=await supabaseBrowser.rpc('carwash_accept_staff_invitation',{invite_token:authUser.user_metadata.invite_token,staff_name:authUser.user_metadata.full_name||authUser.email});
-      if(accepted.error)throw accepted.error;
-      const refreshed=await supabaseBrowser.from('carwash_memberships').select('id,role,tenant_id,full_name,phone,branch,status').eq('user_id',authUser.id).eq('status','ACTIVE').order('role',{ascending:true}).limit(10);
-      if(refreshed.error)throw refreshed.error;
-      membership=(refreshed.data||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role))||null;
-    }
+    const inviteToken=new URLSearchParams(window.location.search).get('invite')||authUser.user_metadata?.invite_token;
+    const preferredTenant=window.localStorage.getItem(`cw-active-tenant:${authUser.id}`);
+    let membership;
+    if(inviteToken){const accepted=await supabaseBrowser.rpc('carwash_accept_staff_invitation',{invite_token:inviteToken,staff_name:authUser.user_metadata?.full_name||authUser.email});if(accepted.error)throw accepted.error;membership=accepted.data;window.localStorage.setItem(`cw-active-tenant:${authUser.id}`,membership.tenant_id);clearStaffInviteFromUrl();void supabaseBrowser.auth.updateUser({data:{invite_token:null}});}
+    else membership=(memberships||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role)&&(!preferredTenant||item.tenant_id===preferredTenant))||(memberships||[]).find((item)=>['BUSINESS_ADMIN','RECEPTIONIST','WASHER'].includes(item.role))||null;
     if(!membership){
       const meta=authUser.user_metadata||{};
       let {data:request}=await supabaseBrowser.from('carwash_access_requests').select('status').eq('user_id',authUser.id).maybeSingle();
@@ -697,22 +703,23 @@ function CustomersPage({customers,vehicles,query,setQuery,onAdd,canSelect,canEdi
 function ServicesPage({services,jobs,canDelete,canEdit,onEdit,selectedIds,deleting,onToggle,onSelectAll,onClearSelection,onDelete,onAdd,onChange}){const eligible=services.filter((service)=>!jobs.some((job)=>job.serviceIds?.includes(service.id)));return <><PageHeading title="Services & pricing" subtitle="Configure wash services, customer prices and worker commission rules." action={<button className="cw-primary" onClick={onAdd}><Plus size={16}/> Add service</button>}/>{canDelete&&<div className="cw-bulk-actions"><span>{selectedIds.length} selected{deleting?' · Deleting…':''}</span><button type="button" disabled={deleting||(!services.length&&!selectedIds.length)} onClick={()=>selectedIds.length?onClearSelection():onSelectAll(services.slice(0,100).map((service)=>service.id))}>{selectedIds.length?'Deselect all':'Select up to 100'}</button><button type="button" disabled={deleting||!selectedIds.length} onClick={onClearSelection}>Clear selection</button><button type="button" className="danger" disabled={deleting||!selectedIds.length} onClick={()=>onDelete(selectedIds)}><Trash2 size={14}/>{deleting?'Deleting…':'Delete selected'}</button><small>Services already used on wash orders stay in your business history.</small></div>}<div className="cw-service-grid">{services.map((service,index)=>{const unused=!jobs.some((job)=>job.serviceIds?.includes(service.id));return <article className="cw-service-card" key={service.id}>{canDelete&&<label className="cw-service-select"><input type="checkbox" aria-label={`Select service ${service.name}`} checked={selectedIds.includes(service.id)} disabled={deleting||(!selectedIds.includes(service.id)&&selectedIds.length>=100)} onChange={()=>onToggle(service.id)}/> Select</label>}<div className="cw-service-head"><div className={`cw-service-icon service-${index%4}`}><Sparkles size={19}/></div><span className={`cw-active-tag ${service.active?'':'inactive'}`}><i/>{service.active?'ACTIVE':'PAUSED'}</span></div><span className="cw-service-category">{service.category}</span><h2>{service.name}</h2><p>Average time · {service.duration} min</p><div className="cw-service-price"><span>Customer price</span><b>{formatKes(service.price)}</b></div><div className="cw-service-price commission-line"><span>Washer commission</span><b>{formatKes(service.commission)}</b></div><div className="cw-service-actions">{canEdit&&<button type="button" className="cw-secondary" onClick={()=>onEdit(service)}><Pencil size={14}/>Update</button>}<button className="cw-secondary cw-wide" onClick={()=>onChange(service)}>{service.active?'Pause service':'Activate service'}</button></div></article>;})}{!services.length&&<EmptyPanel title="No services yet" text="Add the services your car wash offers."/>}</div></>}
 
 function StaffPage({staff,jobs,selectedIds=[],updating=false,onEdit,onToggle,onSelectAll,onClearSelection,onBulkStatus,onAdd,onChange}){
-  const selected=staff.filter((person)=>selectedIds.includes(person.id));
+  const selectableStaff=staff.filter((person)=>['Washer','Receptionist'].includes(person.role));
+  const selected=selectableStaff.filter((person)=>selectedIds.includes(person.id));
   const canDeactivate=selected.some((person)=>person.status==='Active');
   const canReactivate=selected.some((person)=>person.status!=='Active');
   return <>
     <PageHeading title="Staff" subtitle="View team memberships, branch assignments and access status." action={<button className="cw-primary" onClick={onAdd}><Plus size={16}/> Add team member</button>}/>
-    <div className="cw-bulk-actions"><span>{selectedIds.length} selected{updating?' · Updating…':''}</span><button type="button" disabled={updating||(!staff.length&&!selectedIds.length)} onClick={()=>selectedIds.length?onClearSelection():onSelectAll(staff.slice(0,100).map((person)=>person.id))}>{selectedIds.length?'Deselect all':'Select up to 100'}</button><button type="button" disabled={updating||!selectedIds.length} onClick={onClearSelection}>Clear selection</button><button type="button" disabled={updating||!canDeactivate} onClick={()=>onBulkStatus(selectedIds,false)}>Deactivate selected</button><button type="button" disabled={updating||!canReactivate} onClick={()=>onBulkStatus(selectedIds,true)}>Reactivate selected</button><small>Staff accounts can be deactivated or reactivated. Membership and work history are retained for audit.</small></div>
+    <div className="cw-bulk-actions cw-staff-bulk-actions"><span>{selected.length} selected{updating?' · Updating…':''}</span><button type="button" disabled={updating||(!selectableStaff.length&&!selected.length)} onClick={()=>selected.length?onClearSelection():onSelectAll(selectableStaff.slice(0,100).map((person)=>person.id))}>{selected.length?'Deselect all':'Select up to 100'}</button>{selected.length>0&&<button type="button" disabled={updating} onClick={onClearSelection}>Clear selection</button>}{canDeactivate&&<button type="button" disabled={updating} onClick={()=>onBulkStatus(selected.map((person)=>person.id),false)}>Deactivate selected</button>}{canReactivate&&<button type="button" disabled={updating} onClick={()=>onBulkStatus(selected.map((person)=>person.id),true)}>Reactivate selected</button>}<small>Business Admin access is managed in business settings. Staff work history is retained.</small></div>
     <div className="cw-panel cw-table-panel"><div className="cw-table-wrap"><table className="cw-table">
       <thead><tr><th>SELECT</th><th>TEAM MEMBER</th><th>ROLE</th><th>BRANCH</th><th>STATUS</th><th>JOBS TODAY</th><th/></tr></thead>
-      <tbody>{staff.map((person,index)=><tr key={person.id}>
-        <td><input type="checkbox" aria-label={`Select ${person.name}`} checked={selectedIds.includes(person.id)} disabled={updating||(!selectedIds.includes(person.id)&&selectedIds.length>=100)} onChange={()=>onToggle(person.id)}/></td>
+      <tbody>{staff.map((person,index)=>{const canManage=['Washer','Receptionist'].includes(person.role);return <tr key={person.id}>
+        <td>{canManage?<input type="checkbox" aria-label={`Select ${person.name}`} checked={selectedIds.includes(person.id)} disabled={updating||(!selectedIds.includes(person.id)&&selected.length>=100)} onChange={()=>onToggle(person.id)}/>:<span className="cw-dash">—</span>}</td>
         <td><div className="cw-person-cell"><div className={`cw-person-avatar avatar-${index%4}`}>{person.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{person.name}</b><small>{person.email||person.phone||'Invited team member'}</small></span></div></td>
         <td>{person.role}</td><td>{person.branch}</td>
         <td><span className={`cw-active-tag ${person.status==='Active'?'':'inactive'}`}><i/>{person.status}</span></td>
         <td>{person.role==='Washer'?jobs.filter((job)=>job.washerId===person.id).length:'—'}</td>
-        <td><div className="cw-row-actions"><button type="button" className="cw-secondary cw-mini-button" onClick={()=>onEdit(person)}><Pencil size={13}/>Update</button><button className="cw-secondary cw-mini-button" onClick={()=>onChange(person)}>{person.status==='Active'?'Deactivate':'Reactivate'}</button></div></td>
-      </tr>)}</tbody>
+        <td>{canManage?<div className="cw-row-actions"><button type="button" className="cw-secondary cw-mini-button" onClick={()=>onEdit(person)}><Pencil size={13}/>Update</button><button type="button" className="cw-secondary cw-mini-button" onClick={()=>onChange(person)}>{person.status==='Active'?'Deactivate':'Reactivate'}</button></div>:<span className="cw-dash">Business owner</span>}</td>
+      </tr>})}</tbody>
     </table></div></div>
   </>;
 }

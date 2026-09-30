@@ -523,8 +523,14 @@ begin
   select * into invite from public.carwash_staff_invitations
     where token_hash=encode(digest(invite_token,'sha256'),'hex') and status='PENDING' and expires_at>now() for update;
   if not found then raise exception 'This staff invitation has expired or was already used.' using errcode='P0002'; end if;
-  insert into public.carwash_memberships(user_id,tenant_id,role,full_name,phone,status)
-    values(auth.uid(),invite.tenant_id,invite.role,trim(staff_name),invite.phone,'ACTIVE') returning * into result;
+  select * into result from public.carwash_memberships where user_id=auth.uid() and tenant_id=invite.tenant_id for update;
+  if found then
+    if result.role<>invite.role then raise exception 'This account already has a different role in this business.' using errcode='23505'; end if;
+    update public.carwash_memberships set full_name=trim(staff_name),phone=invite.phone,status='ACTIVE' where id=result.id returning * into result;
+  else
+    insert into public.carwash_memberships(user_id,tenant_id,role,full_name,phone,status)
+      values(auth.uid(),invite.tenant_id,invite.role,trim(staff_name),invite.phone,'ACTIVE') returning * into result;
+  end if;
   update public.carwash_staff_invitations set status='ACCEPTED',accepted_by=auth.uid(),accepted_at=now() where id=invite.id;
   insert into public.carwash_user_messages(user_id,kind,subject,body)
     values(auth.uid(),'ACCOUNT_APPROVED','Your staff account is active','Your '||replace(invite.role,'_',' ')||' account is now active. Sign in to open your OshaHub Carwash portal.');
