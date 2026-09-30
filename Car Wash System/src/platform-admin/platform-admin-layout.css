@@ -11,3 +11,5 @@
 @media(max-width:680px){.pa-content{padding:22px 16px 40px}.pa-topbar{height:62px;padding-inline:15px}.pa-page-title h1{font-size:28px}.pa-panel{border-radius:12px}.pa-panel-head{padding-inline:16px}}
 /* Refined platform heading weights for a calmer, more readable console. */
 .pa-page-title h1{font-weight:700;letter-spacing:-.55px}.pa-panel>h2,.pa-panel-head h2{font-weight:650}.pa-sidebar nav button span{font-weight:550}.pa-table-wrap table thead th{font-weight:650;letter-spacing:.5px}.pa-page-title>span,.pa-kicker{font-weight:700;letter-spacing:1px}
+/* Use the same Inter type system in platform administration. */
+.pa-shell,.pa-shell button,.pa-shell input,.pa-shell select,.pa-shell textarea{font-family:Inter,"Segoe UI",system-ui,sans-serif}.pa-page-title h1{font-size:30px;font-weight:600;letter-spacing:-.45px}.pa-panel>h2,.pa-panel-head h2{font-size:15px;font-weight:600}.pa-panel-head p{font-size:12px;font-weight:400}.pa-sidebar nav button span{font-size:12px;font-weight:500}.pa-table-wrap table thead th{font-size:9px;font-weight:600;letter-spacing:.45px}
