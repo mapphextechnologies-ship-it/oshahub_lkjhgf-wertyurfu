@@ -67,6 +67,7 @@ export default function CarWashApp() {
 
   useEffect(()=>{ clearLegacyBrowserData(); },[]);
   useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
+  useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const preference=data?.user?.user_metadata?.oshaHubTheme;if(['light','dark'].includes(preference))setTheme(preference);}});return()=>{active=false;};},[user?.authUserId]);
   useEffect(()=>{if(!menuOpen)return undefined;const closeOutside=(event)=>{if(!sidebarRef.current?.contains(event.target))setMenuOpen(false);};document.addEventListener('pointerdown',closeOutside,true);return()=>document.removeEventListener('pointerdown',closeOutside,true);},[menuOpen]);
   useEffect(()=>{
     if(!supabaseBrowser){setAuthLoading(false);return undefined;}
@@ -192,6 +193,7 @@ export default function CarWashApp() {
 
   function patchDb(edit) { setDb((old)=>edit(JSON.parse(JSON.stringify(old)))); }
   function notify(message) { setToast(message); }
+  async function changeTheme(nextTheme){setTheme(nextTheme);if(!user?.authUserId||!supabaseBrowser)return;try{const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubTheme:nextTheme}});if(error)notify('Theme updated on this device, but could not sync to your OshaHub account.');}catch{notify('Theme updated on this device, but could not sync to your OshaHub account.');}}
   function navigate(key) { setScreen(key); setMenuOpen(false); setQuery(''); setFilter('All'); }
   function login(selected) {
     if(!selected)return;
@@ -355,7 +357,7 @@ export default function CarWashApp() {
         {screen==='tenants'&&<TenantsPage tenants={db.tenants} onAdd={()=>setModal('tenant')} onChange={(item,status)=>patchDb((next)=>{const row=next.tenants.find((x)=>x.id===item.id);if(row)row.status=status;return next;})}/>}
         {screen==='plans'&&<PlansPage plans={db.plans||[]} tenants={db.tenants} onAdd={()=>setModal('plan')}/>}
         {screen==='audit'&&<AuditPage rows={scoped(db.audit)}/>}
-        {screen==='settings'&&<SettingsPage db={db} theme={theme} onThemeChange={setTheme} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Run database/migrations/20260929_tenant_settings.sql in the Supabase SQL Editor, then refresh this page.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
+        {screen==='settings'&&<SettingsPage db={db} theme={theme} onThemeChange={changeTheme} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Run database/migrations/20260929_tenant_settings.sql in the Supabase SQL Editor, then refresh this page.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(error.message);return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
         {screen==='profile'&&<ProfilePage user={user} tenant={tenant} onLogout={logout}/>}
       </section>
     </main>
@@ -676,7 +678,7 @@ function SettingsPage({db,onSave,theme,onThemeChange}){
         <button className="cw-primary" onClick={()=>onSave({businessName:name,branch,loyaltyRate:Math.max(0,K(rate))})}>Save settings <Check size={16}/></button>
       </div>
       <div className="cw-panel cw-info-panel"><ShieldCheck size={22}/><h3>Your workspace is tenant scoped</h3><p>Business users see records belonging to their own organization. Role access determines which actions appear in the workspace.</p><div><span>Business</span><b>{db.settings.businessName}</b></div><div><span>Currency</span><b>Kenyan Shilling (KES)</b></div><div><span>Workspace role</span><b>Business Admin</b></div></div>
-      <section className="cw-panel cw-appearance-panel"><div className="cw-panel-head"><div><h2>Appearance</h2><p>Choose the workspace colors that suit your screen.</p></div></div><div className="cw-theme-options"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><span className="cw-theme-preview light"><Sun size={20}/><i/><i/><i/></span><span><b>Light</b><small>Bright background</small></span>{theme==='light'&&<CheckCircle2 size={17}/>}</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><span className="cw-theme-preview dark"><Moon size={20}/><i/><i/><i/></span><span><b>Dark</b><small>Low-light workspace</small></span>{theme==='dark'&&<CheckCircle2 size={17}/>}</button></div><p className="cw-appearance-note">Appearance is saved on this device and does not change your business data.</p></section>
+      <section className="cw-panel cw-appearance-panel"><div className="cw-panel-head"><div><h2>Appearance</h2><p>Choose the workspace colors that suit your screen.</p></div></div><div className="cw-theme-options"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><span className="cw-theme-preview light"><Sun size={20}/><i/><i/><i/></span><span><b>Light</b><small>Bright background</small></span>{theme==='light'&&<CheckCircle2 size={17}/>}</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><span className="cw-theme-preview dark"><Moon size={20}/><i/><i/><i/></span><span><b>Dark</b><small>Low-light workspace</small></span>{theme==='dark'&&<CheckCircle2 size={17}/>}</button></div><p className="cw-appearance-note">Appearance syncs to your OshaHub account and is applied in this browser.</p></section>
     </div>
   </>;
 }
