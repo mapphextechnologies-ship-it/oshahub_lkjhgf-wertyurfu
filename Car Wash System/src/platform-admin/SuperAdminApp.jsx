@@ -32,20 +32,30 @@ export default function SuperAdminApp() {
   useEffect(() => {
     if (!supabaseBrowser) { setAuthLoading(false); return undefined; }
     let active = true;
+    let restoreTimedOut = false;
+    const restoreTimeout = window.setTimeout(() => {
+      restoreTimedOut = true;
+      setError(supabaseErrorMessage(new TypeError('Failed to fetch'), 'Unable to restore your administrator session.'));
+      setAuthLoading(false);
+    }, 12_000);
     supabaseBrowser.auth.getSession().then(async ({ data, error: sessionError }) => {
-      if (!active) return;
-      if (sessionError) { setError(sessionError.message); setAuthLoading(false); return; }
+      if (!active || restoreTimedOut) return;
+      if (sessionError) { setError(supabaseErrorMessage(sessionError, 'Unable to restore your administrator session.')); return; }
       const user = data.session?.user;
-      if (!user) { setAuthLoading(false); return; }
+      if (!user) return;
       const { data: memberships, error: membershipError } = await supabaseBrowser.from('carwash_memberships')
         .select('id,role,tenant_id,full_name,status').eq('user_id', user.id).eq('role', 'SUPER_ADMIN').eq('status', 'ACTIVE').is('tenant_id', null).limit(1);
-      if (!active) return;
-      if (membershipError) setError(membershipError.message);
+      if (!active || restoreTimedOut) return;
+      if (membershipError) setError(supabaseErrorMessage(membershipError, 'Unable to restore your administrator session.'));
       else if (memberships?.[0]) setSession({ user, membership: memberships[0] });
       else setError('This signed-in account does not have an active Super Admin membership.');
-      setAuthLoading(false);
-    }).catch((sessionError) => { if (active) { setError(sessionError.message || 'Unable to restore your administrator session.'); setAuthLoading(false); } });
-    return () => { active = false; };
+    }).catch((sessionError) => {
+      if (active && !restoreTimedOut) setError(supabaseErrorMessage(sessionError, 'Unable to restore your administrator session.'));
+    }).finally(() => {
+      window.clearTimeout(restoreTimeout);
+      if (active && !restoreTimedOut) setAuthLoading(false);
+    });
+    return () => { active = false; window.clearTimeout(restoreTimeout); };
   }, []);
 
   const loadData = useCallback(async ({ quiet = false } = {}) => {
