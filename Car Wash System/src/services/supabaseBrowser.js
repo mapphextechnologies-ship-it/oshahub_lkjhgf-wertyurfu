@@ -23,6 +23,14 @@ export const supabaseConfigMessage = missingConfig.length
     ? 'VITE_SUPABASE_URL must be a valid Supabase project URL (HTTPS, except localhost development).'
     : '';
 
+export function supabaseErrorMessage(error, fallback = 'Unable to connect to OshaHub.') {
+  const message = error?.message || '';
+  if (error instanceof TypeError || /failed to fetch|network error|timeout/i.test(message)) {
+    return 'Cannot reach the OshaHub database. Check that the Supabase project is active and that Vercel has the correct VITE_SUPABASE_URL and public anon/publishable key for Production, then redeploy.';
+  }
+  return message || fallback;
+}
+
 function fetchWithTimeout(input, init = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);

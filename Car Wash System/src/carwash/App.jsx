@@ -6,7 +6,7 @@ import {
   Download, History, LayoutDashboard, Languages, LogOut, Menu, MoreHorizontal, Play, Plus, Search,
   Settings, ShieldCheck, Share2, Sparkles, Store, Sun, Moon, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff, Trash2, Pencil
 } from 'lucide-react';
-import { supabaseBrowser, supabaseConfigMessage } from '../services/supabaseBrowser.js';
+import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage } from '../services/supabaseBrowser.js';
 import { dbMethod, loadLiveWorkspace } from './liveWorkspace.js';
 import {
   clearLegacyBrowserData, clearSession, demoUsers, formatKes, getSession, markUserSeen,
@@ -120,7 +120,7 @@ export default function CarWashApp() {
         const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
         if(messageError)throw messageError;
         if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch,billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
-      }catch(error){if(active)setAuthRestoreError(error.message||'Unable to reconnect your workspace. Check your connection and retry.');}
+      }catch(error){if(active)setAuthRestoreError(supabaseErrorMessage(error,'Unable to reconnect your workspace. Check your connection and retry.'));}
       finally{if(active)setAuthLoading(false);}
     };
     restore();
@@ -575,8 +575,8 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     let active=true;
     supabaseBrowser.auth.getSession().then(async({data,error:sessionError})=>{
       if(!active)return;
-      if(sessionError){setError(sessionError.message);return;}
-      if(data.session?.user){try{await openWorkspace(data.session.user);}catch(e){if(active)setError(e?.message||'Unable to load your account.');}}
+      if(sessionError){setError(supabaseErrorMessage(sessionError,'Unable to restore your sign-in.'));return;}
+      if(data.session?.user){try{await openWorkspace(data.session.user);}catch(e){if(active)setError(supabaseErrorMessage(e,'Unable to load your account.'));}}
     });
     return()=>{active=false;};
   },[]);
@@ -645,7 +645,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
         if(signInError)throw signInError;
         await openWorkspace(data.user);
       }
-    }catch(e){setError(e?.message||'Unable to complete the request. Please try again.');}
+    }catch(e){setError(supabaseErrorMessage(e,'Unable to complete the request. Please try again.'));}
     finally{setLoading(false);}
   }
   async function demoEnter(){setLoading(true);onLogin(selected);setLoading(false);}

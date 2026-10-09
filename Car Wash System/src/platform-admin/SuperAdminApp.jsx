@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, Search, Settings, ShieldCheck, Smartphone, Trash2, X } from 'lucide-react';
-import { supabaseBrowser, supabaseConfigMessage } from '../services/supabaseBrowser.js';
+import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage } from '../services/supabaseBrowser.js';
 
 const EMPTY_DATA = { tenants: [], requests: [], plans: [], subscriptions: [], subscriptionPayments: [], billingRequests: [], billingSchemaReady: true };
 
@@ -83,18 +83,23 @@ export default function SuperAdminApp() {
     event.preventDefault();
     if (!supabaseBrowser) return;
     setBusy(true); setError('');
-    const { data: result, error: authError } = await supabaseBrowser.auth.signInWithPassword({ email: email.trim(), password });
-    if (authError) { setError(authError.message); setBusy(false); return; }
-    const { data: memberships, error: membershipError } = await supabaseBrowser.from('carwash_memberships')
-      .select('id,role,tenant_id,full_name,status').eq('user_id', result.user.id).eq('role', 'SUPER_ADMIN').eq('status', 'ACTIVE').is('tenant_id', null).limit(1);
-    const membership = memberships?.[0];
-    if (membershipError || !membership) {
-      setError(membershipError?.message || 'This account does not have an active Super Admin membership.');
-      setBusy(false); return;
+    try {
+      const { data: result, error: authError } = await supabaseBrowser.auth.signInWithPassword({ email: email.trim(), password });
+      if (authError) { setError(supabaseErrorMessage(authError, 'Sign-in failed. Please try again.')); return; }
+      const { data: memberships, error: membershipError } = await supabaseBrowser.from('carwash_memberships')
+        .select('id,role,tenant_id,full_name,status').eq('user_id', result.user.id).eq('role', 'SUPER_ADMIN').eq('status', 'ACTIVE').is('tenant_id', null).limit(1);
+      const membership = memberships?.[0];
+      if (membershipError || !membership) {
+        setError(membershipError?.message || 'This account does not have an active Super Admin membership.');
+        return;
+      }
+      setSession({ user: result.user, membership });
+      setPassword('');
+    } catch (signInError) {
+      setError(supabaseErrorMessage(signInError, 'Unable to sign in. Please try again.'));
+    } finally {
+      setBusy(false);
     }
-    setSession({ user: result.user, membership });
-    setPassword('');
-    setBusy(false);
   }
 
   async function signOut() {
