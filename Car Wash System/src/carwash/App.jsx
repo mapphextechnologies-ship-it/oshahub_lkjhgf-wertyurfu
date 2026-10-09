@@ -673,7 +673,7 @@ function Overview({db,role,user,jobs,revenue,active,ready,onNavigate,onCreate,on
   ] : role==='Washer' ? [
     ['Assigned today',active,'Jobs ready for you',Waves,'blue'],['In progress',jobs.filter((job)=>job.status==='IN PROGRESS').length,'Keep up the shine',Activity,'amber'],['Completed',jobs.filter((job)=>['COMPLETED','READY','DELIVERED','CLOSED'].includes(job.status)).length,'Your finished washes',CheckCircle2,'green'],['Commission',formatKes(db.commissions.filter((row)=>row.workerId===user.staffId).reduce((n,row)=>n+K(row.amount),0)),'Recorded earnings',CircleDollarSign,'blue']
   ] : [
-    ['Collected today',formatKes(revenue),'Across recorded payments',Banknote,'blue'],['Active washes',active,'Vehicles being washed',Waves,'amber'],['Ready for pickup',ready,'Quality check passed',CheckCircle2,'green'],['Vehicles checked in',jobs.length,'Today’s wash queue',CarFront,'blue']
+    ['Collected today',formatKes(revenue),'Across recorded payments',Banknote,'blue'],['Active washes',active,'Vehicles being washed',Waves,'green'],['Ready for pickup',ready,'Quality check passed',CheckCircle2,'green'],['Vehicles checked in',jobs.length,'Today’s wash queue',CarFront,'blue']
   ];
   const viewJobs=(role==='Washer'?jobs.filter((job)=>['ASSIGNED','IN PROGRESS'].includes(job.status)):jobs.filter((job)=>job.status!=='CLOSED')).slice(0,5);
   return <>
