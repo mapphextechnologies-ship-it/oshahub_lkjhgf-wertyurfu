@@ -39,12 +39,24 @@ export async function loadLiveWorkspace(user) {
   const customers = customerRes.data.map((row) => ({ id: row.id, name: row.full_name, phone: row.phone, email: row.email || '', points: 0, visits: 0, lastVisit: 'New', tenant_id: tenantId }));
   const vehicles = vehicleRes.data.map((row) => ({ id: row.id, customerId: row.customer_id, registration: row.registration, make: row.make, model: row.model, color: row.color || '', tenant_id: tenantId }));
   const orderServices = orderServiceRes.data;
+  const orderServicesByOrder = new Map();
+  for (const line of orderServices) {
+    const lines = orderServicesByOrder.get(line.order_id) || [];
+    lines.push(line);
+    orderServicesByOrder.set(line.order_id, lines);
+  }
+  const paidByOrder = new Map();
+  for (const payment of paymentRes.data) {
+    if (payment.status === 'PAID') paidByOrder.set(payment.order_id, (paidByOrder.get(payment.order_id) || 0) + Number(payment.amount_kes));
+  }
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
   const jobs = orderRes.data.map((row) => {
-    const lines = orderServices.filter((line) => line.order_id === row.id);
-    const paid = paymentRes.data.filter((payment) => payment.order_id === row.id && payment.status === 'PAID').reduce((sum, payment) => sum + Number(payment.amount_kes), 0);
+    const lines = orderServicesByOrder.get(row.id) || [];
+    const paid = paidByOrder.get(row.id) || 0;
     const paymentStatus = paid >= Number(row.subtotal_kes) ? 'PAID' : paid ? 'PARTIAL' : row.payment_status;
     const job = { id: row.id, tenant_id: tenantId, customerId: row.customer_id, vehicleId: row.vehicle_id, washerId: row.washer_membership_id, serviceIds: lines.map((line) => line.service_id), serviceNames: lines.map((line) => line.service_name_snapshot), total: isWasher ? 0 : Number(row.subtotal_kes), paidAmount: paid, commission: isWasher ? 0 : lines.reduce((sum, line) => sum + Number(line.commission_kes_snapshot||0), 0), status: row.status, paymentStatus, paymentMethod: '', checkedInAt: row.checked_in_at, createdAt: time(row.checked_in_at) };
-    for (const customer of customers) if (customer.id === job.customerId) { customer.visits++; customer.lastVisit = day(row.checked_in_at); }
+    const customer = customerById.get(job.customerId);
+    if (customer) { customer.visits++; customer.lastVisit = day(row.checked_in_at); }
     return job;
   });
   const payments = paymentRes.data.map((row) => ({ id: row.id, tenant_id: tenantId, jobId: row.order_id, amount: Number(row.amount_kes), method: row.method, status: row.status, reference: row.external_reference || '', time: time(row.recorded_at), recordedAt: row.recorded_at }));
