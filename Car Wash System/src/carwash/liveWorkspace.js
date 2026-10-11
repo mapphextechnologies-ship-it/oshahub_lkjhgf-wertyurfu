@@ -43,12 +43,12 @@ export async function loadLiveWorkspace(user) {
     const lines = orderServices.filter((line) => line.order_id === row.id);
     const paid = paymentRes.data.filter((payment) => payment.order_id === row.id && payment.status === 'PAID').reduce((sum, payment) => sum + Number(payment.amount_kes), 0);
     const paymentStatus = paid >= Number(row.subtotal_kes) ? 'PAID' : paid ? 'PARTIAL' : row.payment_status;
-    const job = { id: row.id, tenant_id: tenantId, customerId: row.customer_id, vehicleId: row.vehicle_id, washerId: row.washer_membership_id, serviceIds: lines.map((line) => line.service_id), serviceNames: lines.map((line) => line.service_name_snapshot), total: Number(row.subtotal_kes), paidAmount: paid, commission: lines.reduce((sum, line) => sum + Number(line.commission_kes_snapshot), 0), status: row.status, paymentStatus, paymentMethod: '', createdAt: time(row.checked_in_at) };
+    const job = { id: row.id, tenant_id: tenantId, customerId: row.customer_id, vehicleId: row.vehicle_id, washerId: row.washer_membership_id, serviceIds: lines.map((line) => line.service_id), serviceNames: lines.map((line) => line.service_name_snapshot), total: Number(row.subtotal_kes), paidAmount: paid, commission: lines.reduce((sum, line) => sum + Number(line.commission_kes_snapshot), 0), status: row.status, paymentStatus, paymentMethod: '', checkedInAt: row.checked_in_at, createdAt: time(row.checked_in_at) };
     for (const customer of customers) if (customer.id === job.customerId) { customer.visits++; customer.lastVisit = day(row.checked_in_at); }
     return job;
   });
   const payments = paymentRes.data.map((row) => ({ id: row.id, tenant_id: tenantId, jobId: row.order_id, amount: Number(row.amount_kes), method: row.method, status: row.status, reference: row.external_reference || '', time: time(row.recorded_at), recordedAt: row.recorded_at }));
-  const commissions = commissionRes.data.map((row) => ({ id: row.id, tenant_id: tenantId, jobId: row.order_id, workerId: row.worker_membership_id, amount: Number(row.amount_kes), status: row.status, date: day(row.recorded_at) }));
+  const commissions = commissionRes.data.map((row) => ({ id: row.id, tenant_id: tenantId, jobId: row.order_id, workerId: row.worker_membership_id, amount: Number(row.amount_kes), status: row.status, recordedAt: row.recorded_at, date: day(row.recorded_at) }));
   for (const row of loyaltyRes.data) { const customer = customers.find((entry) => entry.id === row.customer_id); if (customer) customer.points = Number(row.balance_points); }
   const audit = auditRes.data.map((row) => ({ id: row.id, tenant_id: tenantId, action: row.action.replaceAll('_', ' ').toLowerCase(), detail: row.details?.order_id || row.entity_id || '', time: time(row.created_at) }));
   const settings = tenant.settings || {};
