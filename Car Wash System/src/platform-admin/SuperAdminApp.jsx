@@ -191,7 +191,7 @@ export default function SuperAdminApp() {
   async function changeTenantStatus(tenant, status) {
     setBusy(true); setError(''); setNotice('');
     try {
-      const { error: updateError } = await supabaseBrowser.from('carwash_tenants').update({ status }).eq('id', tenant.id).select('id').single();
+      const { error: updateError } = await supabaseBrowser.rpc('carwash_update_platform_tenant',{target_tenant:tenant.id,p_name:tenant.name,p_owner_name:tenant.owner_name,p_status:status});
       if (updateError) setError(userFacingErrorMessage(updateError,'Could not update this business. Try again.'));
       else { setNotice(`${tenant.name} updated to ${status}.`); await loadData(); }
     } catch (updateError) { setError(userFacingErrorMessage(updateError,'Could not update this business. Try again.')); }
@@ -203,7 +203,7 @@ export default function SuperAdminApp() {
     if(name.length<2||name.length>120||owner_name.length<2||owner_name.length>120){setError('Business and owner names must be 2 to 120 characters.');return false;}
     setBusy(true);setError('');setNotice('');
     try {
-      const {error:updateError}=await supabaseBrowser.from('carwash_tenants').update({name,owner_name}).eq('id',tenant.id).select('id').single();
+      const {error:updateError}=await supabaseBrowser.rpc('carwash_update_platform_tenant',{target_tenant:tenant.id,p_name:name,p_owner_name:owner_name,p_status:tenant.status});
       if(updateError){setError(userFacingErrorMessage(updateError,'Could not save these business details. Check them and try again.'));return false;}
       setNotice(`${name} details updated.`);await loadData();return true;
     } catch(updateError) { setError(userFacingErrorMessage(updateError,'Could not save these business details. Try again.'));return false; }
@@ -216,7 +216,7 @@ export default function SuperAdminApp() {
     if(name.length<2||!Number.isFinite(price_kes)||price_kes<0||!Number.isInteger(duration_days)||duration_days<1||!Number.isInteger(branches)||branches===0||!Number.isInteger(staff)||staff===0){setError('Enter a valid plan name, price, duration and capacity. Use -1 for unlimited capacity.');return false;}
     setBusy(true);setError('');setNotice('');
     try {
-      const {error:updateError}=await supabaseBrowser.from('carwash_plans').update({name,price_kes,duration_days,feature_flags:{...plan.feature_flags,branches,staff,description}}).eq('id',plan.id).select('id').single();
+      const {error:updateError}=await supabaseBrowser.rpc('carwash_update_platform_plan',{target_plan:plan.id,p_name:name,p_price_kes:price_kes,p_duration_days:duration_days,p_feature_flags:{...plan.feature_flags,branches,staff,description}});
       if(updateError){setError(userFacingErrorMessage(updateError,'Could not update this plan. Try again.'));return false;}
       setNotice(`${name} plan updated.`);await loadData();return true;
     } catch(updateError) { setError(userFacingErrorMessage(updateError,'Could not update this plan. Try again.'));return false; }
@@ -231,7 +231,7 @@ export default function SuperAdminApp() {
     if(!deletable.length){setError('These plans are linked to subscriptions, payment history or billing requests, so they must stay for records.');return;}
     if(!window.confirm(`Delete ${deletable.length} unused plan${deletable.length===1?'':'s'}? Plans with billing history will be kept.`))return;
     setDeletingPlans(true);setError('');setNotice('');
-    try{const {data:deleted,error:deleteError}=await supabaseBrowser.rpc('carwash_delete_unused_plans',{p_plan_ids:deletable}).abortSignal(AbortSignal.timeout(15000));if(deleteError)throw deleteError;if(!Number.isInteger(deleted)||deleted!==deletable.length)throw new Error('The selected plans could not all be deleted. Refresh and try again.');setSelectedPlanIds([]);setNotice(`${deleted} unused plan${deleted===1?'':'s'} deleted.${protectedPlans.length?` ${protectedPlans.length} linked plan${protectedPlans.length===1?' was':'s were'} kept.`:''}`);await loadData();}
+    try{const {data:deleted,error:deleteError}=await supabaseBrowser.rpc('carwash_delete_unused_plans',{p_plan_ids:deletable}).abortSignal(AbortSignal.timeout(15000));if(deleteError)throw deleteError;if(!Number.isInteger(deleted)||deleted!==deletable.length)throw new Error('Some selected plans are in use or no longer available. Refresh the list; plans with billing history are kept.');setSelectedPlanIds([]);setNotice(`${deleted} unused plan${deleted===1?'':'s'} deleted.${protectedPlans.length?` ${protectedPlans.length} linked plan${protectedPlans.length===1?' was':'s were'} kept.`:''}`);await loadData();}
     catch(deleteError){setError(deleteError.code==='PGRST202'?'This action is temporarily unavailable. Contact support if the problem continues.':userFacingErrorMessage(deleteError,'Could not delete unused plans.'))}
     finally{setDeletingPlans(false);}
   }
