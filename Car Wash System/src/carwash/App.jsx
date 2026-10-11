@@ -39,6 +39,7 @@ const K = (value) => Number(value || 0);
 const shortTime = () => new Intl.DateTimeFormat('en-KE',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
 const IDLE_LOGOUT_MS = 30 * 60 * 1000;
 const activityKey = (userId) => `osha-cw-last-activity:${userId}`;
+const isSubscriptionReminder = (item) => item?.reference_key?.startsWith('PLAN_REMINDER:') || item?.reference_key?.startsWith('PLAN_OVERDUE:') || /subscription reminder|plan.{0,40}expires?|make a payment before it expires/i.test(`${item?.subject||''} ${item?.body||''}`);
 
 export default function CarWashApp() {
   const [db, setDb] = useState(readDb);
@@ -61,6 +62,7 @@ export default function CarWashApp() {
   const sidebarRef=useRef(null);
   const [modal, setModal] = useState('');
   const [toast, setToast] = useState('');
+  const [installPrompt, setInstallPrompt] = useState(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
   const [liveLoading, setLiveLoading] = useState(false);
@@ -80,6 +82,13 @@ export default function CarWashApp() {
   const [selectedCommissionIds, setSelectedCommissionIds] = useState([]);
 
   useEffect(()=>{ clearLegacyBrowserData(); },[]);
+  useEffect(()=>{
+    const captureInstallPrompt=(event)=>{event.preventDefault();setInstallPrompt(event);};
+    const installed=()=>{setInstallPrompt(null);setToast('OshaHub is installed on this device.');};
+    window.addEventListener('beforeinstallprompt',captureInstallPrompt);
+    window.addEventListener('appinstalled',installed);
+    return()=>{window.removeEventListener('beforeinstallprompt',captureInstallPrompt);window.removeEventListener('appinstalled',installed);};
+  },[]);
   useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
   useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const preference=data?.user?.user_metadata?.oshaHubTheme;if(['light','dark'].includes(preference))setTheme(preference);}});return()=>{active=false;};},[user?.authUserId]);
   function closeMenuFromOutside(event){if(sidebarRef.current?.contains(event.target))return;if(window.matchMedia('(max-width: 980px)').matches){if(menuOpen)setMenuOpen(false);return;}if(!sidebarCollapsed)setSidebarCollapsed(true);}
@@ -156,7 +165,7 @@ export default function CarWashApp() {
     if(!user?.authUserId)return;
     let active=true;
     const refresh=()=>supabaseBrowser.from('carwash_user_messages').select('id,kind,subject,body,read_at,created_at,reference_key').eq('user_id',user.authUserId).order('created_at',{ascending:false}).limit(50)
-      .then(({data,error})=>{if(!active||error)return;const next=data||[];const fresh=next.find((item)=>item.reference_key?.startsWith('PLAN_REMINDER:')||item.reference_key?.startsWith('PLAN_OVERDUE:'));if(!['Washer','Receptionist'].includes(user.role)&&fresh&&!notificationsRef.current.some((item)=>item.id===fresh.id))setToast(fresh.body);notificationsRef.current=next;setNotifications(next);});
+      .then(({data,error})=>{if(!active||error)return;const next=data||[];const fresh=next.find(isSubscriptionReminder);if(!['washer','receptionist'].includes(String(user.role).toLowerCase())&&fresh&&!notificationsRef.current.some((item)=>item.id===fresh.id))setToast(fresh.body);notificationsRef.current=next;setNotifications(next);});
     refresh();
     const timer=window.setInterval(async()=>{
       const {error:reminderError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:user.tenant_id});
@@ -165,7 +174,7 @@ export default function CarWashApp() {
       if(!reminderError&&!billingError&&Boolean(canOperate)!==Boolean(user.billingRestricted)){
         const next={...user,billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${user.tenant_name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${user.tenant_name||'your business workspace'}.`:''};
         setUser(next);saveSession(next);
-        if(canOperate===false&&!['Washer','Receptionist'].includes(user.role))setToast(next.activationMessage);
+        if(canOperate===false&&!['washer','receptionist'].includes(String(user.role).toLowerCase()))setToast(next.activationMessage);
       }
       refresh();
     },60000);
@@ -214,8 +223,8 @@ export default function CarWashApp() {
   },[user?.id,showLogin,authMode]);
 
   const role = user?.role || '';
-  const isStaffRole = ['Washer','Receptionist'].includes(role);
-  const visibleNotifications = isStaffRole ? notifications.filter((item)=>!item.reference_key?.startsWith('PLAN_REMINDER:')&&!item.reference_key?.startsWith('PLAN_OVERDUE:')) : notifications;
+  const isStaffRole = ['washer','receptionist'].includes(String(role).toLowerCase());
+  const visibleNotifications = isStaffRole ? notifications.filter((item)=>!isSubscriptionReminder(item)) : notifications;
   const tenantId = user?.tenant_id || db.activeTenantId;
   const tenant = db.tenants.find((item)=>item.id===tenantId) || db.tenants[0];
   const scoped = (rows) => rows.filter((item)=>role==='SaaS Super Admin'||item.tenant_id===tenantId);
@@ -234,6 +243,17 @@ export default function CarWashApp() {
 
   function patchDb(edit) { setDb((old)=>edit(JSON.parse(JSON.stringify(old)))); }
   function notify(message) { setToast(message); }
+  async function installApp(){
+    if(!installPrompt){
+      const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
+      notify(isIos?'To install, tap Share in Safari, then choose Add to Home Screen.':'To install, open your browser menu and choose Install app or Add to Home Screen.');
+      return;
+    }
+    await installPrompt.prompt();
+    const result=await installPrompt.userChoice;
+    if(result?.outcome==='accepted')notify('OshaHub was added to this device.');
+    setInstallPrompt(null);
+  }
   async function changeTheme(nextTheme){setTheme(nextTheme);if(!user?.authUserId||!supabaseBrowser)return;try{const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubTheme:nextTheme}});if(error)notify('Theme updated on this device, but could not sync to your OshaHub account.');}catch{notify('Theme updated on this device, but could not sync to your OshaHub account.');}}
   function navigate(key) { setScreen(key); setMenuOpen(false); setQuery(''); setFilter('All'); }
   function login(selected) {
@@ -454,7 +474,7 @@ export default function CarWashApp() {
       <div className="cw-workspace"><div className="cw-workspace-mark"><Store size={16}/></div><div className="cw-workspace-copy"><b>{role==='SaaS Super Admin'?'Platform owner':tenant?.name||db.settings.businessName}</b><span>{ROLE_COPY[role]}</span></div><ChevronDown size={15}/></div>
       <div className="cw-nav-label">WORKSPACE</div>
       <nav className="cw-nav">{myNav.map(([key,label,Icon])=><button key={key} className={`cw-nav-item ${screen===key?'active':''}`} onClick={()=>navigate(key)}><Icon size={18}/><span>{label}</span>{key==='jobs'&&activeCount>0&&<i>{activeCount}</i>}</button>)}</nav>
-      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
+      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}{isStaffRole&&<button type="button" className="cw-install-app" onClick={installApp}><Download size={15}/><span>Install app</span></button>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
     </aside>
     {menuOpen&&<button className="cw-mobile-scrim" onPointerDown={()=>setMenuOpen(false)} onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
     <main className="cw-main">
@@ -462,7 +482,7 @@ export default function CarWashApp() {
       <section className="cw-page">
         {liveError&&<div className="cw-auth-alert error" role="alert">{liveError}</div>}
         {user.billingRestricted&&!isStaffRole&&<div className="cw-auth-alert error" role="alert"><b>Your workspace is restricted.</b><br/>{user.activationMessage||`Make a payment to continue using ${user.tenant_name||'your business workspace'}.`}</div>}
-        {!isStaffRole&&!user.billingRestricted&&notifications.find((item)=>item.reference_key?.startsWith('PLAN_REMINDER:')&&!item.read_at)&&<div className="cw-auth-alert billing-reminder" role="status"><b>Subscription reminder</b><br/>{notifications.find((item)=>item.reference_key?.startsWith('PLAN_REMINDER:')&&!item.read_at)?.body}</div>}
+        {!isStaffRole&&!user.billingRestricted&&notifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)&&<div className="cw-auth-alert billing-reminder" role="status"><b>Subscription reminder</b><br/>{notifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)?.body}</div>}
         {screen==='overview'&&<Overview db={db} role={role} user={user} jobs={workerJobs} payments={scoped(db.payments)} revenue={dailyRevenue} active={activeCount} ready={readyCount} onNavigate={navigate} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment}/>}
         {screen==='jobs'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment} canDelete={['Business Admin','Receptionist','Washer'].includes(role)} selectedIds={selectedJobIds} deleting={deletingJobs} onToggle={(id)=>setSelectedJobIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedJobIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClearSelection={()=>setSelectedJobIds([])} onDelete={deleteWashOrders}/>}
         {screen==='history'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} history onTransition={updateJob} onPayment={recordPayment}/>}
