@@ -34,7 +34,7 @@ export async function loadLiveWorkspace(user) {
   ]);
   for (const result of [tenantRes, staffRes, serviceRes, customerRes, vehicleRes, orderRes, orderServiceRes, paymentRes, commissionRes, loyaltyRes, auditRes, plansRes, subscriptionsRes, subscriptionPaymentsRes]) fail(result);
   const tenant = tenantRes.data;
-  const staff = staffRes.data.map((row) => ({ id: row.id, name: row.full_name, email: row.user_id === user.authUserId ? user.email : '', role: ({ BUSINESS_ADMIN: 'Business Admin', RECEPTIONIST: 'Receptionist', WASHER: 'Washer' })[row.role] || row.role, branch: row.branch || 'Main branch', status: row.status === 'ACTIVE' ? 'Active' : 'Inactive', tenant_id: tenantId }));
+  const staff = staffRes.data.map((row) => ({ id: row.id, name: row.full_name, email: row.user_id === user.authUserId ? user.email : '', role: ({ BUSINESS_ADMIN: 'Business Admin', RECEPTIONIST: 'Receptionist', WASHER: 'Washer' })[row.role] || row.role, branch: row.branch || 'Main branch', status: row.status === 'ACTIVE' ? 'Active' : row.status === 'PENDING' ? 'Pending approval' : 'Inactive', tenant_id: tenantId }));
   const services = serviceRes.data.map((row) => ({ id: row.id, name: row.name, category: row.category || 'Wash service', price: Number(row.price_kes), commission: Number(row.commission_kes), duration: row.estimated_minutes, active: row.active, tenant_id: tenantId }));
   const customers = customerRes.data.map((row) => ({ id: row.id, name: row.full_name, phone: row.phone, email: row.email || '', points: 0, visits: 0, lastVisit: 'New', tenant_id: tenantId }));
   const vehicles = vehicleRes.data.map((row) => ({ id: row.id, customerId: row.customer_id, registration: row.registration, make: row.make, model: row.model, color: row.color || '', tenant_id: tenantId }));
