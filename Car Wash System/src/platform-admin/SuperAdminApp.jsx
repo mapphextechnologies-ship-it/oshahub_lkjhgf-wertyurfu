@@ -78,7 +78,7 @@ export default function SuperAdminApp() {
     else {
       const billingSchemaReady=!subscriptionPayments.error;
       setData({ tenants: tenants.data || [], requests: requests.data || [], plans: plans.data || [], subscriptions: subscriptions.data || [], subscriptionPayments: subscriptionPayments.data || [], billingRequests: billingRequests.error ? [] : billingRequests.data || [], billingSchemaReady });
-      if(!billingSchemaReady)setError('Run database/migrations/20260929_platform_billing.sql in the Supabase SQL Editor to enable confirmed payment totals.');
+      if(!billingSchemaReady)setError('Confirmed payment totals are temporarily unavailable. Contact support if the problem continues.');
     }
     if (!quiet) setBusy(false);
   }, []);
@@ -122,10 +122,12 @@ export default function SuperAdminApp() {
 
   async function reviewRequest(id, approve) {
     setBusy(true); setError(''); setNotice('');
-    const { error: reviewError } = await supabaseBrowser.rpc('carwash_review_business_request', { p_request: id, p_approve: approve });
-    if (reviewError) setError(userFacingErrorMessage(reviewError,'Could not review this request. Refresh and try again.'));
-    else { setNotice(approve ? 'Business approved and account activation was sent to its in-app inbox.' : 'Business request declined and the applicant was notified in-app.'); await loadData(); }
-    setBusy(false);
+    try {
+      const { error: reviewError } = await supabaseBrowser.rpc('carwash_review_business_request', { p_request: id, p_approve: approve });
+      if (reviewError) setError(userFacingErrorMessage(reviewError,'Could not review this request. Refresh and try again.'));
+      else { setNotice(approve ? 'Business approved and account activation was sent to its in-app inbox.' : 'Business request declined and the applicant was notified in-app.'); await loadData(); }
+    } catch (reviewError) { setError(userFacingErrorMessage(reviewError,'Could not review this request. Refresh and try again.')); }
+    finally { setBusy(false); }
   }
 
   async function deleteRequests(ids) {
@@ -135,7 +137,7 @@ export default function SuperAdminApp() {
     try {
       const { data: deleted, error: deleteError } = await supabaseBrowser.rpc('carwash_delete_business_requests', { p_request_ids: requestIds }).abortSignal(AbortSignal.timeout(15000));
       if (deleteError) setError(deleteError.code === 'PGRST202' ? 'This action is temporarily unavailable. Contact support if the problem continues.' : userFacingErrorMessage(deleteError,'Could not delete the selected requests. Refresh and try again.'));
-      else if (deleted < requestIds.length) { setError('Some requests could not be deleted. Refresh the list and try again.'); void loadData({ quiet: true }); }
+      else if (!Number.isInteger(deleted) || deleted !== requestIds.length) { setError('Some requests could not be deleted. Refresh the list and try again.'); void loadData({ quiet: true }); }
       else { setSelectedRequests([]); setData((old)=>({...old,requests:old.requests.filter((request)=>!requestIds.includes(request.id))})); setNotice(`${deleted} request${deleted === 1 ? '' : 's'} deleted. Approved business accounts remain active.`); void loadData({ quiet: true }).catch((refreshError)=>setError(userFacingErrorMessage(refreshError,'Requests were deleted, but the list could not refresh.'))); }
     } catch (deleteError) { setError(deleteError.name === 'TimeoutError' || deleteError.name === 'AbortError' ? 'The deletion took too long. Check your connection and refresh the request list before trying again.' : userFacingErrorMessage(deleteError,'Could not delete these requests.')); }
     finally { setDeletingRequests(false); }
@@ -145,7 +147,7 @@ export default function SuperAdminApp() {
     const planId = planSelections[tenant.id];
     if (!planId) { setError('Choose a plan before activating it.'); return; }
     const plan = data.plans.find((item) => item.id === planId);
-    if (!data.billingSchemaReady) { setError('Run the platform billing database migration before confirming subscription payments.'); return; }
+    if (!data.billingSchemaReady) { setError('Payment confirmation is temporarily unavailable. Contact support if the problem continues.'); return; }
     const branchCount=data.subscriptions.find((subscription)=>subscription.tenant_id===tenant.id)?.branch_count||data.subscriptionPayments.find((payment)=>payment.tenant_id===tenant.id)?.branch_count||1;
     const branchLimit=Number(plan?.feature_flags?.branches??1);
     if(branchLimit!==-1&&branchCount>branchLimit){setError(`${plan.name} supports ${branchLimit} branch${branchLimit===1?'':'es'}. Choose a plan that covers all ${branchCount} branches.`);return;}
@@ -155,10 +157,12 @@ export default function SuperAdminApp() {
 
   async function reviewBillingRequest(request, approve) {
     setBusy(true); setError(''); setNotice('');
-    const { error: reviewError } = await supabaseBrowser.rpc('carwash_review_billing_request', { p_request_id: request.id, p_approve: approve });
-    if (reviewError) setError(userFacingErrorMessage(reviewError,'Could not review this payment. Refresh and try again.'));
-    else { setNotice(approve ? 'Billing request approved. The business was notified.' : 'Billing request declined. The business was notified.'); await loadData(); }
-    setBusy(false);
+    try {
+      const { error: reviewError } = await supabaseBrowser.rpc('carwash_review_billing_request', { p_request_id: request.id, p_approve: approve });
+      if (reviewError) setError(userFacingErrorMessage(reviewError,'Could not review this payment. Refresh and try again.'));
+      else { setNotice(approve ? 'Billing request approved. The business was notified.' : 'Billing request declined. The business was notified.'); await loadData(); }
+    } catch (reviewError) { setError(userFacingErrorMessage(reviewError,'Could not review this payment. Refresh and try again.')); }
+    finally { setBusy(false); }
   }
 
   async function confirmPlanActivation(event) {
@@ -166,35 +170,44 @@ export default function SuperAdminApp() {
     const tenant=activationTenant;
     if(!tenant)return;
     setBusy(true); setError(''); setNotice('');
-    const { error: activationError } = await supabaseBrowser.rpc('carwash_activate_tenant_plan', { target_tenant: tenant.id, target_plan: tenant.selectedPlan.id, payment_method: paymentMethod, payment_reference: paymentReference.trim()||null,p_branch_count:tenant.selectedPlan.branchCount||1 });
-    if (activationError) setError(activationError.code==='PGRST202'?'This action is temporarily unavailable. Contact support if the problem continues.':userFacingErrorMessage(activationError,'Could not activate this plan. Check the selection and try again.'));
-    else { setNotice(`${tenant.selectedPlan.name} activated for ${tenant.name}; KES ${money(tenant.selectedPlan.totalDue)} recorded, including the KES ${money(tenant.selectedPlan.onboardingFee)} onboarding fee. The business team was notified.`); setActivationTenant(null); setPaymentReference(''); await loadData(); }
-    setBusy(false);
+    try {
+      const { error: activationError } = await supabaseBrowser.rpc('carwash_activate_tenant_plan', { target_tenant: tenant.id, target_plan: tenant.selectedPlan.id, payment_method: paymentMethod, payment_reference: paymentReference.trim()||null,p_branch_count:tenant.selectedPlan.branchCount||1 });
+      if (activationError) setError(userFacingErrorMessage(activationError,'Could not activate this plan. Check the selection and try again.'));
+      else { setNotice(`${tenant.selectedPlan.name} activated for ${tenant.name}; KES ${money(tenant.selectedPlan.totalDue)} recorded, including the KES ${money(tenant.selectedPlan.onboardingFee)} onboarding fee. The business team was notified.`); setActivationTenant(null); setPaymentReference(''); await loadData(); }
+    } catch (activationError) { setError(userFacingErrorMessage(activationError,'Could not activate this plan. Check the selection and try again.')); }
+    finally { setBusy(false); }
   }
 
   async function saveAdminName(event) {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
-    const { data: membership, error: nameError } = await supabaseBrowser.rpc('carwash_update_platform_admin_name', { p_full_name: adminName });
-    if (nameError) setError(userFacingErrorMessage(nameError,'Could not save this business name. Check it and try again.'));
-    else { setSession((old) => ({ ...old, membership })); setNotice('Super Admin profile name updated.'); }
-    setBusy(false);
+    try {
+      const { data: membership, error: nameError } = await supabaseBrowser.rpc('carwash_update_platform_admin_name', { p_full_name: adminName });
+      if (nameError) setError(userFacingErrorMessage(nameError,'Could not save your Super Admin name. Check it and try again.'));
+      else { setSession((old) => ({ ...old, membership })); setNotice('Super Admin profile name updated.'); }
+    } catch (nameError) { setError(userFacingErrorMessage(nameError,'Could not save your Super Admin name. Try again.')); }
+    finally { setBusy(false); }
   }
 
   async function changeTenantStatus(tenant, status) {
     setBusy(true); setError(''); setNotice('');
-    const { error: updateError } = await supabaseBrowser.from('carwash_tenants').update({ status }).eq('id', tenant.id);
-    if (updateError) setError(userFacingErrorMessage(updateError,'Could not update this business. Try again.'));
-    else { setNotice(`${tenant.name} updated to ${status}.`); await loadData(); }
-    setBusy(false);
+    try {
+      const { error: updateError } = await supabaseBrowser.from('carwash_tenants').update({ status }).eq('id', tenant.id).select('id').single();
+      if (updateError) setError(userFacingErrorMessage(updateError,'Could not update this business. Try again.'));
+      else { setNotice(`${tenant.name} updated to ${status}.`); await loadData(); }
+    } catch (updateError) { setError(userFacingErrorMessage(updateError,'Could not update this business. Try again.')); }
+    finally { setBusy(false); }
   }
 
   async function updateTenantDetails(tenant, fields) {
     const name=fields.name.trim(),owner_name=fields.owner_name.trim();
     if(name.length<2||name.length>120||owner_name.length<2||owner_name.length>120){setError('Business and owner names must be 2 to 120 characters.');return false;}
     setBusy(true);setError('');setNotice('');
-    const {error:updateError}=await supabaseBrowser.from('carwash_tenants').update({name,owner_name}).eq('id',tenant.id);
-    if(updateError){setError(userFacingErrorMessage(updateError,'Could not save this plan. Check the details and try again.'));setBusy(false);return false;}
-    setNotice(`${name} details updated.`);await loadData();setBusy(false);return true;
+    try {
+      const {error:updateError}=await supabaseBrowser.from('carwash_tenants').update({name,owner_name}).eq('id',tenant.id).select('id').single();
+      if(updateError){setError(userFacingErrorMessage(updateError,'Could not save these business details. Check them and try again.'));return false;}
+      setNotice(`${name} details updated.`);await loadData();return true;
+    } catch(updateError) { setError(userFacingErrorMessage(updateError,'Could not save these business details. Try again.'));return false; }
+    finally { setBusy(false); }
   }
 
   async function updatePlan(plan, fields) {
@@ -202,9 +215,12 @@ export default function SuperAdminApp() {
     const branches=Number(fields.branches),staff=Number(fields.staff),description=fields.description.trim();
     if(name.length<2||!Number.isFinite(price_kes)||price_kes<0||!Number.isInteger(duration_days)||duration_days<1||!Number.isInteger(branches)||branches===0||!Number.isInteger(staff)||staff===0){setError('Enter a valid plan name, price, duration and capacity. Use -1 for unlimited capacity.');return false;}
     setBusy(true);setError('');setNotice('');
-    const {error:updateError}=await supabaseBrowser.from('carwash_plans').update({name,price_kes,duration_days,feature_flags:{...plan.feature_flags,branches,staff,description}}).eq('id',plan.id);
-    if(updateError){setError(userFacingErrorMessage(updateError,'Could not update this plan. Try again.'));setBusy(false);return false;}
-    setNotice(`${name} plan updated.`);await loadData();setBusy(false);return true;
+    try {
+      const {error:updateError}=await supabaseBrowser.from('carwash_plans').update({name,price_kes,duration_days,feature_flags:{...plan.feature_flags,branches,staff,description}}).eq('id',plan.id).select('id').single();
+      if(updateError){setError(userFacingErrorMessage(updateError,'Could not update this plan. Try again.'));return false;}
+      setNotice(`${name} plan updated.`);await loadData();return true;
+    } catch(updateError) { setError(userFacingErrorMessage(updateError,'Could not update this plan. Try again.'));return false; }
+    finally { setBusy(false); }
   }
 
   async function deleteSelectedPlans(ids) {
@@ -215,7 +231,7 @@ export default function SuperAdminApp() {
     if(!deletable.length){setError('These plans are linked to subscriptions, payment history or billing requests, so they must stay for records.');return;}
     if(!window.confirm(`Delete ${deletable.length} unused plan${deletable.length===1?'':'s'}? Plans with billing history will be kept.`))return;
     setDeletingPlans(true);setError('');setNotice('');
-    try{const {data:deleted,error:deleteError}=await supabaseBrowser.rpc('carwash_delete_unused_plans',{p_plan_ids:deletable});if(deleteError)throw deleteError;setSelectedPlanIds([]);setNotice(`${deleted} unused plan${deleted===1?'':'s'} deleted.${protectedPlans.length?` ${protectedPlans.length} linked plan${protectedPlans.length===1?' was':'s were'} kept.`:''}`);await loadData();}
+    try{const {data:deleted,error:deleteError}=await supabaseBrowser.rpc('carwash_delete_unused_plans',{p_plan_ids:deletable}).abortSignal(AbortSignal.timeout(15000));if(deleteError)throw deleteError;if(!Number.isInteger(deleted)||deleted!==deletable.length)throw new Error('The selected plans could not all be deleted. Refresh and try again.');setSelectedPlanIds([]);setNotice(`${deleted} unused plan${deleted===1?'':'s'} deleted.${protectedPlans.length?` ${protectedPlans.length} linked plan${protectedPlans.length===1?' was':'s were'} kept.`:''}`);await loadData();}
     catch(deleteError){setError(deleteError.code==='PGRST202'?'This action is temporarily unavailable. Contact support if the problem continues.':userFacingErrorMessage(deleteError,'Could not delete unused plans.'))}
     finally{setDeletingPlans(false);}
   }
@@ -262,6 +278,7 @@ export default function SuperAdminApp() {
         {busy && <div className="pa-loading"><LoaderCircle size={15}/> Syncing platform data…</div>}
         {section === 'overview' && <>
           <PageTitle eyebrow="PLATFORM OVERVIEW" title={`Welcome, ${session.membership.full_name.split(' ')[0]}.`} description="Review business access and monitor the OshaHub network."/>
+          {pending.length > 0 && <section className="pa-approval-callout"><div><span>BUSINESS APPROVALS</span><strong>{pending.length} registration{pending.length===1?'':'s'} waiting</strong><p>Review new business accounts and approve access.</p></div><button type="button" onClick={()=>setSection('requests')}>Review requests <ChevronRight size={16}/></button></section>}
           <div className="pa-metrics"><Metric label="Collected" value={`KES ${money(collected)}`} icon={Banknote}/><Metric label="Unpaid businesses" value={unpaidBillingRows.length} icon={Clock3} highlight/><Metric label="M-Pesa payments" value={data.subscriptionPayments.filter((row)=>row.method==='M-PESA').length} icon={Smartphone}/><Metric label="Pending requests" value={pending.length+pendingBillingRequests.length} icon={ArrowDownToLine}/></div>
           <PlatformActivityChart tenants={data.tenants} payments={data.subscriptionPayments}/>
         </>}
@@ -287,7 +304,7 @@ export default function SuperAdminApp() {
 function AdminAuthLoading() { return <main className="pa-auth-loading" role="status" aria-live="polite"><img src="/osha-hub-logo.svg" alt="OshaHub"/><h1>Restoring your secure session…</h1><p>Connecting to the platform console</p><div><i/></div></main>; }
 
 function AdminSignIn({ email, setEmail, password, setPassword, onSubmit, busy, error }) {
-  return <main className="pa-login"><section className="pa-login-brand"><a href="/"><img src="/osha-hub-logo.svg" alt="OshaHub"/></a><span>PLATFORM OWNER CONSOLE</span><h1>One platform.<br/>Every car wash.</h1><p>Review tenant applications, manage platform access and oversee subscriptions from a private administrator workspace.</p><div><ShieldCheck size={16}/> ACCESS RESTRICTED TO PLATFORM ADMINS</div></section><section className="pa-login-form-wrap"><form className="pa-login-form" onSubmit={onSubmit}><span className="pa-kicker">SUPER ADMINISTRATION</span><h2>Super Admin sign in</h2><p>Use the platform owner account assigned to you.</p><label>Email address<input type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@yourbusiness.com"/></label><label>Password<input type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password"/></label><button disabled={busy || !supabaseBrowser}>{busy ? 'Signing in…' : 'Sign in to platform'}</button>{!supabaseBrowser && <div className="pa-feedback error"><CircleAlert size={16}/><span>Supabase is not configured. {supabaseConfigMessage}</span></div>}{error && <div className="pa-feedback error"><CircleAlert size={16}/><span>{error}</span></div>}<small>OshaHub platform administration · Authorized accounts only</small></form></section></main>;
+  return <main className="pa-login"><section className="pa-login-brand"><a href="/"><img src="/osha-hub-logo.svg" alt="OshaHub"/></a><span>PLATFORM OWNER CONSOLE</span><h1>One platform.<br/>Every car wash.</h1><p>Review tenant applications, manage platform access and oversee subscriptions from a private administrator workspace.</p><div><ShieldCheck size={16}/> ACCESS RESTRICTED TO PLATFORM ADMINS</div></section><section className="pa-login-form-wrap"><form className="pa-login-form" onSubmit={onSubmit}><span className="pa-kicker">SUPER ADMINISTRATION</span><h2>Super Admin sign in</h2><p>Use the platform owner account assigned to you.</p><label>Email address<input type="email" required autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@yourbusiness.com"/></label><label>Password<input type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password"/></label><button disabled={busy || !supabaseBrowser}>{busy ? 'Signing in…' : 'Sign in to platform'}</button>{!supabaseBrowser && <div className="pa-feedback error"><CircleAlert size={16}/><span>Sign-in is temporarily unavailable. {supabaseConfigMessage}</span></div>}{error && <div className="pa-feedback error"><CircleAlert size={16}/><span>{error}</span></div>}<small>OshaHub platform administration · Authorized accounts only</small></form></section></main>;
 }
 
 function PageTitle({ eyebrow, title, description }) { return <div className="pa-page-title"><span>{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>; }
@@ -314,10 +331,11 @@ function BillingDashboard({rows,tenants,plans,paidRows,unpaidRows,payments,colle
 function BillingStatusTable({rows,onUpdateTenant}){const [selected,setSelected]=useState([]);return <><SelectionControls rows={rows.map((row)=>({id:row.tenant.id}))} selectedIds={selected} onSelectAll={(ids)=>setSelected(ids)} onClear={()=>setSelected([])}/><div className="pa-table-wrap"><table><thead><tr><th aria-label="Select"/><th>BUSINESS</th><th>PLAN</th><th>PAYMENT</th><th>ENDS</th><th>ACTION</th></tr></thead><tbody>{rows.map(({tenant,subscription,payment,plan,isPaid})=><tr key={tenant.id}><td><input type="checkbox" aria-label={`Select ${tenant.name}`} checked={selected.includes(tenant.id)} disabled={!selected.includes(tenant.id)&&selected.length>=100} onChange={()=>setSelected((old)=>old.includes(tenant.id)?old.filter((id)=>id!==tenant.id):[...old,tenant.id])}/></td><td><b>{tenant.name}</b><small className="pa-id">{tenant.owner_name}</small></td><td>{plan?.name||'No plan'}</td><td><StatusPill status={isPaid?'PAID':'UNPAID'}/>{payment&&<small className="pa-id">{payment.method}</small>}</td><td>{subscription?date(subscription.ends_at):'—'}</td><td><button className="pa-activate" onClick={()=>onUpdateTenant(tenant,plan?.id)}>Update plan</button></td></tr>)}{!rows.length&&<tr><td colSpan="6"><EmptyState>No businesses in this group.</EmptyState></td></tr>}</tbody></table></div></>;}
 function PlatformPaymentsTable({payments,tenants,plans,onUpdateTenant}){const [selected,setSelected]=useState([]);return <><SelectionControls rows={payments} selectedIds={selected} onSelectAll={(ids)=>setSelected(ids)} onClear={()=>setSelected([])} note="Confirmed payment records are retained for audit."/><div className="pa-table-wrap"><table><thead><tr><th aria-label="Select"/><th>BUSINESS</th><th>PLAN</th><th>PAYMENT TYPE</th><th>AMOUNT PAID</th><th>BRANCHES</th><th>METHOD</th><th>REFERENCE</th><th>PAID</th><th>ACTION</th></tr></thead><tbody>{payments.map((payment)=>{const tenant=tenants.find((item)=>item.id===payment.tenant_id);return <tr key={payment.id}><td><input type="checkbox" aria-label={`Select payment for ${tenant?.name||'business'}`} checked={selected.includes(payment.id)} disabled={!selected.includes(payment.id)&&selected.length>=100} onChange={()=>setSelected((old)=>old.includes(payment.id)?old.filter((id)=>id!==payment.id):[...old,payment.id])}/></td><td><b>{tenant?.name||'Business'}</b></td><td>{plans.find((plan)=>plan.id===payment.plan_id)?.name||'Subscription plan'}</td><td>{payment.payment_stage==='ONBOARDING'?'Onboarding':payment.payment_stage==='SUBSCRIPTION'?'Subscription':'Legacy payment'}</td><td><b>KES {money(payment.amount_kes)}</b></td><td>{payment.branch_count||1}</td><td>{payment.method}</td><td>{payment.external_reference||'—'}</td><td>{date(payment.paid_at)}</td><td><button className="pa-activate" disabled={!tenant||!onUpdateTenant} onClick={()=>tenant&&onUpdateTenant(tenant,payment.plan_id)}>Update plan</button></td></tr>;})}{!payments.length&&<tr><td colSpan="10"><EmptyState>No subscription payments have been confirmed yet.</EmptyState></td></tr>}</tbody></table></div></>;}
 function RequestTable({ requests, onReview, busy, selectable = false, selectedIds = [], onToggle }) {
+  const orderedRequests=[...requests].sort((a,b)=>Number(b.status==='PENDING')-Number(a.status==='PENDING')||new Date(b.created_at||0)-new Date(a.created_at||0));
   return <div className={`pa-table-wrap ${selectable ? 'pa-requests' : ''}`}>
     <table>
       <thead><tr>{selectable && <th aria-label="Select"/>}<th>BUSINESS</th><th>OWNER</th><th>PHONE</th><th>STATUS</th><th>RECEIVED</th><th>ACTION</th></tr></thead>
-      <tbody>{requests.map((request) => <tr key={request.id}>
+      <tbody>{orderedRequests.map((request) => <tr key={request.id}>
         {selectable && <td><input aria-label={`Select ${request.tenant_name}`} type="checkbox" checked={selectedIds.includes(request.id)} disabled={busy||(!selectedIds.includes(request.id)&&selectedIds.length>=250)} onChange={() => onToggle(request.id)}/></td>}
         <td><b>{request.tenant_name}</b></td><td>{request.owner_name}</td><td>{request.phone}</td><td><StatusPill status={request.status}/></td><td>{date(request.created_at)}</td>
         <td>{['PENDING', 'REJECTED'].includes(request.status) ? <div className="pa-actions">

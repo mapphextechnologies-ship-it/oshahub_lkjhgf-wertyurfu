@@ -26,6 +26,9 @@ export function userFacingErrorMessage(error, fallback = 'Something went wrong. 
   const normalized = message.toLowerCase();
   const code = String(error?.code || '');
 
+  if (code === 'PGRST202' || /schema cache|could not find the function/.test(normalized)) {
+    return 'This action is temporarily unavailable. Please try again later or contact support.';
+  }
   if (error instanceof TypeError || /failed to fetch|network error|timeout|aborted/i.test(normalized)) {
     return 'We could not connect to OshaHub. Check your internet connection and try again.';
   }
