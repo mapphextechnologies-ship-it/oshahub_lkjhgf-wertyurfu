@@ -89,6 +89,14 @@
   "redirects": [],
   "rewrites": [
     {
+      "source": "/washer",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/receptionist",
+      "destination": "/index.html"
+    },
+    {
       "source": "/register",
       "destination": "/index.html"
     }
