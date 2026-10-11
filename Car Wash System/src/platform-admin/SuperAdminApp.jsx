@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, Search, Settings, ShieldCheck, Smartphone, Trash2, X } from 'lucide-react';
-import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage } from '../services/supabaseBrowser.js';
+import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
 
 const EMPTY_DATA = { tenants: [], requests: [], plans: [], subscriptions: [], subscriptionPayments: [], billingRequests: [], billingSchemaReady: true };
 
@@ -74,7 +74,7 @@ export default function SuperAdminApp() {
       supabaseBrowser.from('carwash_billing_requests').select('*').order('created_at', { ascending: false })
     ]);
     const failed = [tenants, requests, plans, subscriptions].find((result) => result.error);
-    if (failed) setError(failed.error.message);
+    if (failed) setError(userFacingErrorMessage(failed.error,'Could not load the business data. Refresh and try again.'));
     else {
       const billingSchemaReady=!subscriptionPayments.error;
       setData({ tenants: tenants.data || [], requests: requests.data || [], plans: plans.data || [], subscriptions: subscriptions.data || [], subscriptionPayments: subscriptionPayments.data || [], billingRequests: billingRequests.error ? [] : billingRequests.data || [], billingSchemaReady });
@@ -103,7 +103,7 @@ export default function SuperAdminApp() {
         .select('id,role,tenant_id,full_name,status').eq('user_id', result.user.id).eq('role', 'SUPER_ADMIN').eq('status', 'ACTIVE').is('tenant_id', null).limit(1);
       const membership = memberships?.[0];
       if (membershipError || !membership) {
-        setError(membershipError?.message || 'This account does not have an active Super Admin membership.');
+        setError(membershipError ? userFacingErrorMessage(membershipError,'Could not verify administrator access. Try signing in again.') : 'This account does not have an active Super Admin membership.');
         return;
       }
       setSession({ user: result.user, membership });
@@ -123,7 +123,7 @@ export default function SuperAdminApp() {
   async function reviewRequest(id, approve) {
     setBusy(true); setError(''); setNotice('');
     const { error: reviewError } = await supabaseBrowser.rpc('carwash_review_business_request', { p_request: id, p_approve: approve });
-    if (reviewError) setError(reviewError.message);
+    if (reviewError) setError(userFacingErrorMessage(reviewError,'Could not review this request. Refresh and try again.'));
     else { setNotice(approve ? 'Business approved and account activation was sent to its in-app inbox.' : 'Business request declined and the applicant was notified in-app.'); await loadData(); }
     setBusy(false);
   }
@@ -134,10 +134,10 @@ export default function SuperAdminApp() {
     setDeletingRequests(true); setError(''); setNotice('');
     try {
       const { data: deleted, error: deleteError } = await supabaseBrowser.rpc('carwash_delete_business_requests', { p_request_ids: requestIds }).abortSignal(AbortSignal.timeout(15000));
-      if (deleteError) setError(deleteError.code === 'PGRST202' ? 'The database is missing this Super Admin request-cleanup function. Apply database/migrations/20260930_platform_request_cleanup.sql in Supabase, then retry.' : deleteError.message);
-      else if (deleted < requestIds.length) { setError('Some selected request records were not deleted. Apply database/migrations/20261002_safe_bulk_cleanup.sql in Supabase to enable deletion for every request status.'); void loadData({ quiet: true }); }
-      else { setSelectedRequests([]); setData((old)=>({...old,requests:old.requests.filter((request)=>!requestIds.includes(request.id))})); setNotice(`${deleted} request${deleted === 1 ? '' : 's'} deleted. Approved business accounts remain active.`); void loadData({ quiet: true }).catch((refreshError)=>setError(refreshError.message||'Requests were deleted, but the list could not refresh.')); }
-    } catch (deleteError) { setError(deleteError.name === 'TimeoutError' || deleteError.name === 'AbortError' ? 'The deletion took too long. Check your connection and refresh the request list before trying again.' : deleteError.message || 'Could not delete these requests.'); }
+      if (deleteError) setError(deleteError.code === 'PGRST202' ? 'This action is temporarily unavailable. Contact support if the problem continues.' : userFacingErrorMessage(deleteError,'Could not delete the selected requests. Refresh and try again.'));
+      else if (deleted < requestIds.length) { setError('Some requests could not be deleted. Refresh the list and try again.'); void loadData({ quiet: true }); }
+      else { setSelectedRequests([]); setData((old)=>({...old,requests:old.requests.filter((request)=>!requestIds.includes(request.id))})); setNotice(`${deleted} request${deleted === 1 ? '' : 's'} deleted. Approved business accounts remain active.`); void loadData({ quiet: true }).catch((refreshError)=>setError(userFacingErrorMessage(refreshError,'Requests were deleted, but the list could not refresh.'))); }
+    } catch (deleteError) { setError(deleteError.name === 'TimeoutError' || deleteError.name === 'AbortError' ? 'The deletion took too long. Check your connection and refresh the request list before trying again.' : userFacingErrorMessage(deleteError,'Could not delete these requests.')); }
     finally { setDeletingRequests(false); }
   }
 
@@ -156,7 +156,7 @@ export default function SuperAdminApp() {
   async function reviewBillingRequest(request, approve) {
     setBusy(true); setError(''); setNotice('');
     const { error: reviewError } = await supabaseBrowser.rpc('carwash_review_billing_request', { p_request_id: request.id, p_approve: approve });
-    if (reviewError) setError(reviewError.message);
+    if (reviewError) setError(userFacingErrorMessage(reviewError,'Could not review this payment. Refresh and try again.'));
     else { setNotice(approve ? 'Billing request approved. The business was notified.' : 'Billing request declined. The business was notified.'); await loadData(); }
     setBusy(false);
   }
@@ -167,7 +167,7 @@ export default function SuperAdminApp() {
     if(!tenant)return;
     setBusy(true); setError(''); setNotice('');
     const { error: activationError } = await supabaseBrowser.rpc('carwash_activate_tenant_plan', { target_tenant: tenant.id, target_plan: tenant.selectedPlan.id, payment_method: paymentMethod, payment_reference: paymentReference.trim()||null,p_branch_count:tenant.selectedPlan.branchCount||1 });
-    if (activationError) setError(activationError.code==='PGRST202'?'Run database/migrations/20261001_subscription_terms_and_branches.sql in Supabase to enable branch-aware plan activation.':activationError.message);
+    if (activationError) setError(activationError.code==='PGRST202'?'This action is temporarily unavailable. Contact support if the problem continues.':userFacingErrorMessage(activationError,'Could not activate this plan. Check the selection and try again.'));
     else { setNotice(`${tenant.selectedPlan.name} activated for ${tenant.name}; KES ${money(tenant.selectedPlan.totalDue)} recorded, including the KES ${money(tenant.selectedPlan.onboardingFee)} onboarding fee. The business team was notified.`); setActivationTenant(null); setPaymentReference(''); await loadData(); }
     setBusy(false);
   }
@@ -175,7 +175,7 @@ export default function SuperAdminApp() {
   async function saveAdminName(event) {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     const { data: membership, error: nameError } = await supabaseBrowser.rpc('carwash_update_platform_admin_name', { p_full_name: adminName });
-    if (nameError) setError(nameError.message);
+    if (nameError) setError(userFacingErrorMessage(nameError,'Could not save this business name. Check it and try again.'));
     else { setSession((old) => ({ ...old, membership })); setNotice('Super Admin profile name updated.'); }
     setBusy(false);
   }
@@ -183,7 +183,7 @@ export default function SuperAdminApp() {
   async function changeTenantStatus(tenant, status) {
     setBusy(true); setError(''); setNotice('');
     const { error: updateError } = await supabaseBrowser.from('carwash_tenants').update({ status }).eq('id', tenant.id);
-    if (updateError) setError(updateError.message);
+    if (updateError) setError(userFacingErrorMessage(updateError,'Could not update this business. Try again.'));
     else { setNotice(`${tenant.name} updated to ${status}.`); await loadData(); }
     setBusy(false);
   }
@@ -193,7 +193,7 @@ export default function SuperAdminApp() {
     if(name.length<2||name.length>120||owner_name.length<2||owner_name.length>120){setError('Business and owner names must be 2 to 120 characters.');return false;}
     setBusy(true);setError('');setNotice('');
     const {error:updateError}=await supabaseBrowser.from('carwash_tenants').update({name,owner_name}).eq('id',tenant.id);
-    if(updateError){setError(updateError.message);setBusy(false);return false;}
+    if(updateError){setError(userFacingErrorMessage(updateError,'Could not save this plan. Check the details and try again.'));setBusy(false);return false;}
     setNotice(`${name} details updated.`);await loadData();setBusy(false);return true;
   }
 
@@ -203,7 +203,7 @@ export default function SuperAdminApp() {
     if(name.length<2||!Number.isFinite(price_kes)||price_kes<0||!Number.isInteger(duration_days)||duration_days<1||!Number.isInteger(branches)||branches===0||!Number.isInteger(staff)||staff===0){setError('Enter a valid plan name, price, duration and capacity. Use -1 for unlimited capacity.');return false;}
     setBusy(true);setError('');setNotice('');
     const {error:updateError}=await supabaseBrowser.from('carwash_plans').update({name,price_kes,duration_days,feature_flags:{...plan.feature_flags,branches,staff,description}}).eq('id',plan.id);
-    if(updateError){setError(updateError.message);setBusy(false);return false;}
+    if(updateError){setError(userFacingErrorMessage(updateError,'Could not update this plan. Try again.'));setBusy(false);return false;}
     setNotice(`${name} plan updated.`);await loadData();setBusy(false);return true;
   }
 
@@ -216,7 +216,7 @@ export default function SuperAdminApp() {
     if(!window.confirm(`Delete ${deletable.length} unused plan${deletable.length===1?'':'s'}? Plans with billing history will be kept.`))return;
     setDeletingPlans(true);setError('');setNotice('');
     try{const {data:deleted,error:deleteError}=await supabaseBrowser.rpc('carwash_delete_unused_plans',{p_plan_ids:deletable});if(deleteError)throw deleteError;setSelectedPlanIds([]);setNotice(`${deleted} unused plan${deleted===1?'':'s'} deleted.${protectedPlans.length?` ${protectedPlans.length} linked plan${protectedPlans.length===1?' was':'s were'} kept.`:''}`);await loadData();}
-    catch(deleteError){setError(deleteError.code==='PGRST202'?'Apply database/migrations/20261006_safe_unused_plan_cleanup.sql in Supabase, then retry.':deleteError.message||'Could not delete unused plans.');}
+    catch(deleteError){setError(deleteError.code==='PGRST202'?'This action is temporarily unavailable. Contact support if the problem continues.':userFacingErrorMessage(deleteError,'Could not delete unused plans.'))}
     finally{setDeletingPlans(false);}
   }
 
@@ -305,7 +305,7 @@ function BillingRequestsTable({requests,tenants,plans,onReview,busy}){const [sel
 
 function BillingDashboard({rows,tenants,plans,paidRows,unpaidRows,payments,collected,ready,onViewPlans,onUpdateTenant}){
   return <>
-    {!ready&&<div className="pa-alert error"><CircleAlert size={17}/>Apply database/migrations/20260929_platform_billing.sql to record confirmed plan payments.</div>}
+    {!ready&&<div className="pa-alert error"><CircleAlert size={17}/>Confirmed payment totals are temporarily unavailable. Contact support if the problem continues.</div>}
     <div className="pa-metrics pa-billing-metrics"><Metric label="Collected" value={`KES ${money(collected)}`} icon={Banknote}/><Metric label="Unpaid businesses" value={unpaidRows.length} icon={Clock3} highlight/><Metric label="M-Pesa payments" value={payments.filter((row)=>row.method==='M-PESA').length} icon={Smartphone}/><Metric label="Refunds" value="KES 0" icon={ArrowDownToLine}/></div>
     <div className="pa-billing-grid"><section className="pa-panel"><div className="pa-panel-head"><div><h2>Unpaid or overdue</h2><p>Businesses without a confirmed current plan payment.</p></div><button className="pa-text-button" onClick={onViewPlans}>Manage billing <ChevronRight size={15}/></button></div><BillingStatusTable rows={unpaidRows} onUpdateTenant={onUpdateTenant}/></section><section className="pa-panel"><div className="pa-panel-head"><div><h2>Paid businesses</h2><p>Current subscriptions with recorded payment confirmations.</p></div></div><BillingStatusTable rows={paidRows} onUpdateTenant={onUpdateTenant}/></section></div>
     <section className="pa-panel"><div className="pa-panel-head"><div><h2>Recent collections</h2><p>{payments.length} confirmed subscription payments · lifetime</p></div><button className="pa-text-button" onClick={onViewPlans}>View billing <ChevronRight size={15}/></button></div><PlatformPaymentsTable payments={payments.slice(0,5)} tenants={tenants} plans={plans} onUpdateTenant={onUpdateTenant}/></section>
