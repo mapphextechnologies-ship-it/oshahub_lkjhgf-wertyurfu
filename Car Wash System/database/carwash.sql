@@ -826,7 +826,7 @@ create policy cw_order_services_insert on public.carwash_order_services for inse
 drop policy if exists cw_payments_read on public.carwash_payments;
 create policy cw_payments_read on public.carwash_payments for select using (public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN','RECEPTIONIST']));
 drop policy if exists cw_commission_read on public.carwash_commission_ledger;
-create policy cw_commission_read on public.carwash_commission_ledger for select using (public.carwash_has_tenant_access(tenant_id) and (public.carwash_is_platform_admin() or public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN']) or exists(select 1 from public.carwash_memberships m where m.id=worker_membership_id and m.user_id=auth.uid())));
+create policy cw_commission_read on public.carwash_commission_ledger for select using (public.carwash_is_platform_admin() or public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN']));
 drop policy if exists cw_loyalty_accounts_read on public.carwash_loyalty_accounts;
 create policy cw_loyalty_accounts_read on public.carwash_loyalty_accounts for select using (public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN','RECEPTIONIST']));
 drop policy if exists cw_loyalty_ledger_read on public.carwash_loyalty_ledger;

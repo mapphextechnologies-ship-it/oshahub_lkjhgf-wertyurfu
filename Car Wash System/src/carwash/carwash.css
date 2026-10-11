@@ -10,6 +10,7 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 .tone-blue,.tone-green,.tone-amber{color:#078b45!important;background:#e7f7ed!important}
 .cw-dashboard-pulse{grid-template-columns:1fr}
+.cw-shell.role-washer .cw-notification-item.unpaid{display:none}
 .cw-landing-copy{animation:cw-landing-enter .7s cubic-bezier(.2,.75,.25,1) backwards}
 .cw-landing-visual{animation:cw-landing-enter .85s .12s cubic-bezier(.2,.75,.25,1) backwards}
 .cw-workspace-preview{animation:cw-preview-float 6s ease-in-out 1s infinite}

@@ -18,13 +18,13 @@ export async function loadLiveWorkspace(user) {
   }
   const [staffRes, serviceRes, customerRes, vehicleRes, orderRes, orderServiceRes, paymentRes, commissionRes, loyaltyRes, auditRes, plansRes, subscriptionsRes, subscriptionPaymentsRes, billingRequestsRes] = await Promise.all([
     supabaseBrowser.from('carwash_memberships').select('id,role,full_name,phone,branch,status,user_id').eq('tenant_id', tenantId),
-    supabaseBrowser.from('carwash_services').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
+    isWasher ? Promise.resolve({ data: [], error: null }) : supabaseBrowser.from('carwash_services').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
     supabaseBrowser.from('carwash_customers').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
     supabaseBrowser.from('carwash_vehicles').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
-    supabaseBrowser.from('carwash_orders').select('*').eq('tenant_id', tenantId).order('checked_in_at', { ascending: false }),
-    supabaseBrowser.from('carwash_order_services').select('*').eq('tenant_id', tenantId),
+    (isWasher ? supabaseBrowser.from('carwash_orders').select('id,tenant_id,customer_id,vehicle_id,washer_membership_id,status,payment_status,checked_in_at') : supabaseBrowser.from('carwash_orders').select('*')).eq('tenant_id', tenantId).order('checked_in_at', { ascending: false }),
+    (isWasher ? supabaseBrowser.from('carwash_order_services').select('tenant_id,order_id,service_id,service_name_snapshot') : supabaseBrowser.from('carwash_order_services').select('*')).eq('tenant_id', tenantId),
     canSeeMoney ? supabaseBrowser.from('carwash_payments').select('*').eq('tenant_id', tenantId).order('recorded_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
-    supabaseBrowser.from('carwash_commission_ledger').select('*').eq('tenant_id', tenantId).order('recorded_at', { ascending: false }),
+    user.role === 'Business Admin' ? supabaseBrowser.from('carwash_commission_ledger').select('*').eq('tenant_id', tenantId).order('recorded_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
     canSeeMoney ? supabaseBrowser.from('carwash_loyalty_accounts').select('*').eq('tenant_id', tenantId) : Promise.resolve({ data: [], error: null }),
     user.role === 'Business Admin' ? supabaseBrowser.from('carwash_audit_logs').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50) : Promise.resolve({ data: [], error: null }),
     canSeeMoney ? supabaseBrowser.from('carwash_plans').select('id,name,price_kes,duration_days,feature_flags').eq('active', true).order('price_kes') : Promise.resolve({ data: [], error: null }),
@@ -43,7 +43,7 @@ export async function loadLiveWorkspace(user) {
     const lines = orderServices.filter((line) => line.order_id === row.id);
     const paid = paymentRes.data.filter((payment) => payment.order_id === row.id && payment.status === 'PAID').reduce((sum, payment) => sum + Number(payment.amount_kes), 0);
     const paymentStatus = paid >= Number(row.subtotal_kes) ? 'PAID' : paid ? 'PARTIAL' : row.payment_status;
-    const job = { id: row.id, tenant_id: tenantId, customerId: row.customer_id, vehicleId: row.vehicle_id, washerId: row.washer_membership_id, serviceIds: lines.map((line) => line.service_id), serviceNames: lines.map((line) => line.service_name_snapshot), total: Number(row.subtotal_kes), paidAmount: paid, commission: lines.reduce((sum, line) => sum + Number(line.commission_kes_snapshot), 0), status: row.status, paymentStatus, paymentMethod: '', checkedInAt: row.checked_in_at, createdAt: time(row.checked_in_at) };
+    const job = { id: row.id, tenant_id: tenantId, customerId: row.customer_id, vehicleId: row.vehicle_id, washerId: row.washer_membership_id, serviceIds: lines.map((line) => line.service_id), serviceNames: lines.map((line) => line.service_name_snapshot), total: isWasher ? 0 : Number(row.subtotal_kes), paidAmount: paid, commission: isWasher ? 0 : lines.reduce((sum, line) => sum + Number(line.commission_kes_snapshot||0), 0), status: row.status, paymentStatus, paymentMethod: '', checkedInAt: row.checked_in_at, createdAt: time(row.checked_in_at) };
     for (const customer of customers) if (customer.id === job.customerId) { customer.visits++; customer.lastVisit = day(row.checked_in_at); }
     return job;
   });
