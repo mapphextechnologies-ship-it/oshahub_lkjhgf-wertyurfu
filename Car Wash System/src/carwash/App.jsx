@@ -253,14 +253,20 @@ export default function CarWashApp() {
   function notify(message) { setToast(message); }
   async function installApp(){
     if(!installPrompt){
+      const isInstalled=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+      if(isInstalled){notify('OshaHub is already installed on this device.');return;}
       const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
-      notify(isIos?'To install, tap Share in Safari, then choose Add to Home Screen.':'To install, open your browser menu and choose Install app or Add to Home Screen.');
+      const isAndroid=/android/i.test(navigator.userAgent);
+      notify(isIos?'On iPhone or iPad, open this page in Safari, tap Share, then Add to Home Screen.':isAndroid?'The install prompt is not available yet. Open this app in Chrome and choose Install app from the browser menu.':'The install prompt is not available yet. In Chrome or Edge, choose Install app from the address bar or browser menu.');
       return;
     }
-    await installPrompt.prompt();
-    const result=await installPrompt.userChoice;
-    if(result?.outcome==='accepted')notify('OshaHub was added to this device.');
-    setInstallPrompt(null);
+    try{
+      await installPrompt.prompt();
+      const result=await installPrompt.userChoice;
+      if(result?.outcome==='accepted')notify('OshaHub was added to this device.');
+      else notify('You can install OshaHub any time from this button.');
+    }catch{notify('The browser could not start the install prompt. Refresh the app and try again.');}
+    finally{setInstallPrompt(null);}
   }
   async function copyPortalAppLink(){
     const portalPath=String(role).toLowerCase()==='washer'?'/washer':'/receptionist';
