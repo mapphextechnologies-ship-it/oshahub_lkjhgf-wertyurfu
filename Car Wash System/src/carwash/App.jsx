@@ -236,6 +236,14 @@ export default function CarWashApp() {
   const myNav = ROLE_NAV[role] || [];
 
   useEffect(()=>{
+    if(!isStaffRole)return;
+    const portalPath=String(role).toLowerCase()==='washer'?'/washer':'/receptionist';
+    if(window.location.pathname!==portalPath)window.history.replaceState(window.history.state,'',`${portalPath}${window.location.search}${window.location.hash}`);
+    const manifest=document.querySelector('link[rel="manifest"]');
+    if(manifest)manifest.href=String(role).toLowerCase()==='washer'?'/washer.webmanifest':'/receptionist.webmanifest';
+  },[role,isStaffRole]);
+
+  useEffect(()=>{
     if(!user)return;
     const saved=window.sessionStorage.getItem('cw-workspace-screen');
     if(!myNav.some(([key])=>key===screen))setScreen(myNav.some(([key])=>key===saved)?saved:'overview');
@@ -253,6 +261,13 @@ export default function CarWashApp() {
     const result=await installPrompt.userChoice;
     if(result?.outcome==='accepted')notify('OshaHub was added to this device.');
     setInstallPrompt(null);
+  }
+  async function copyPortalAppLink(){
+    const portalPath=String(role).toLowerCase()==='washer'?'/washer':'/receptionist';
+    const portalUrl=new URL(portalPath,window.location.origin).toString();
+    try{await navigator.clipboard.writeText(portalUrl);}
+    catch{const input=document.createElement('textarea');input.value=portalUrl;input.setAttribute('readonly','');input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();const copied=document.execCommand('copy');input.remove();if(!copied){notify('Could not copy the app link. Open '+portalUrl+' and copy it from the address bar.');return;}}
+    notify(`${role} app link copied.`);
   }
   async function changeTheme(nextTheme){setTheme(nextTheme);if(!user?.authUserId||!supabaseBrowser)return;try{const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubTheme:nextTheme}});if(error)notify('Theme updated on this device, but could not sync to your OshaHub account.');}catch{notify('Theme updated on this device, but could not sync to your OshaHub account.');}}
   function navigate(key) { setScreen(key); setMenuOpen(false); setQuery(''); setFilter('All'); }
@@ -474,7 +489,7 @@ export default function CarWashApp() {
       <div className="cw-workspace"><div className="cw-workspace-mark"><Store size={16}/></div><div className="cw-workspace-copy"><b>{role==='SaaS Super Admin'?'Platform owner':tenant?.name||db.settings.businessName}</b><span>{ROLE_COPY[role]}</span></div><ChevronDown size={15}/></div>
       <div className="cw-nav-label">WORKSPACE</div>
       <nav className="cw-nav">{myNav.map(([key,label,Icon])=><button key={key} className={`cw-nav-item ${screen===key?'active':''}`} onClick={()=>navigate(key)}><Icon size={18}/><span>{label}</span>{key==='jobs'&&activeCount>0&&<i>{activeCount}</i>}</button>)}</nav>
-      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}{isStaffRole&&<button type="button" className="cw-install-app" onClick={installApp}><Download size={15}/><span>Install app</span></button>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
+      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}{isStaffRole&&<><button type="button" className="cw-install-app" aria-label={`Copy ${role} app link`} onClick={copyPortalAppLink}><Copy size={15}/><span>Copy app link</span></button><button type="button" className="cw-install-app" aria-label="Install app" onClick={installApp}><Download size={15}/><span>Install app</span></button></>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
     </aside>
     {menuOpen&&<button className="cw-mobile-scrim" onPointerDown={()=>setMenuOpen(false)} onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
     <main className="cw-main">
