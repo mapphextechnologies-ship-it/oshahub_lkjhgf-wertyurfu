@@ -499,8 +499,9 @@ begin
   select * into actor from public.carwash_memberships where user_id=auth.uid() and tenant_id=target_tenant and role='BUSINESS_ADMIN' and status='ACTIVE' limit 1;
   if not found or not public.carwash_can_operate(target_tenant) then raise exception 'Active business administrator access is required.' using errcode='42501'; end if;
   perform public.carwash_consume_rate_limit('STAFF_INVITE',10,3600);
-  normalized_phone:=regexp_replace(coalesce(target_phone,''),'[^0-9+]','','g');
-  if length(regexp_replace(normalized_phone,'[^0-9]','','g')) not between 7 and 15 then raise exception 'Enter a valid team member phone number.' using errcode='22023'; end if;
+  normalized_phone:=regexp_replace(coalesce(target_phone,''),'[^0-9]','','g');
+  if normalized_phone ~ '^2547[0-9]{8}$' then normalized_phone:='0'||substr(normalized_phone,4); end if;
+  if normalized_phone !~ '^07[0-9]{8}$' then raise exception 'Enter a valid Kenyan mobile number beginning with 07.' using errcode='22023'; end if;
   if target_role is null or target_role not in ('RECEPTIONIST','WASHER') then raise exception 'Choose a staff portal managed by the business.' using errcode='22023'; end if;
   raw_token:=encode(gen_random_bytes(32),'hex');
   insert into public.carwash_staff_invitations(tenant_id,invited_by,phone,role,token_hash)
@@ -1470,4 +1471,32 @@ end;
 $$;
 revoke all on function public.carwash_delete_unused_services(uuid,uuid[]) from public,anon;
 grant execute on function public.carwash_delete_unused_services(uuid,uuid[]) to authenticated;
+
+create or replace function public.carwash_delete_unused_plans(p_plan_ids uuid[])
+returns integer
+language plpgsql
+security definer
+set search_path=pg_catalog,public,pg_temp
+as $$
+declare deleted_count integer;
+begin
+  if not public.carwash_is_platform_admin() then
+    raise exception 'Platform administrator access is required.' using errcode='42501';
+  end if;
+  if coalesce(cardinality(p_plan_ids),0)<1 or cardinality(p_plan_ids)>100 then
+    raise exception 'Select between 1 and 100 plans.' using errcode='22023';
+  end if;
+  delete from public.carwash_plans p
+  where p.id=any(p_plan_ids)
+    and not exists(select 1 from public.carwash_subscriptions s where s.plan_id=p.id)
+    and not exists(select 1 from public.carwash_subscription_payments sp where sp.plan_id=p.id)
+    and not exists(select 1 from public.carwash_billing_requests br where br.plan_id=p.id);
+  get diagnostics deleted_count=row_count;
+  insert into public.carwash_audit_logs(actor_user_id,action,entity_type,details)
+  values(auth.uid(),'UNUSED_PLANS_DELETED','PLAN',jsonb_build_object('deleted_count',deleted_count,'plan_ids',to_jsonb(p_plan_ids)));
+  return deleted_count;
+end;
+$$;
+revoke all on function public.carwash_delete_unused_plans(uuid[]) from public,anon;
+grant execute on function public.carwash_delete_unused_plans(uuid[]) to authenticated;
 notify pgrst,'reload schema';
