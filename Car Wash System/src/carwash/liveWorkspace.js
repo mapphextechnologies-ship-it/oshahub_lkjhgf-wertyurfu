@@ -74,6 +74,27 @@ export async function loadLiveWorkspace(user) {
   return { tenant, db: { activeTenantId: tenantId, tenants: [{ id: tenantId, name: tenant.name, owner: tenant.owner_name, plan: currentPlan?.name || user.planName || 'Free trial', status: tenant.status, branches: currentSubscription?.branch_count || 1 }], staff, services, customers, vehicles, jobs, payments, commissions, loyalty: [], audit, billing, settingsSchemaReady: tenantSettingsReady, settings: { businessName: tenant.name, branch: settings.branch || user.branch || 'Main branch', currency: 'KES', loyaltyRate: Number(settings.loyaltyRate ?? 1) } } };
 }
 
+// Keep the team approval list lightweight: refresh only the tenant's memberships
+// instead of reloading customer, billing, and wash-order data while an admin is
+// reviewing new registrations.
+export async function loadLiveStaff(user) {
+  const tenantId = user?.tenant_id;
+  if (!tenantId) throw new Error('This account has no business workspace assigned.');
+  const { data, error } = await supabaseBrowser.from('carwash_memberships')
+    .select('id,role,full_name,phone,branch,status,user_id')
+    .eq('tenant_id', tenantId);
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    name: row.full_name || 'Team member',
+    email: row.user_id === user.authUserId ? user.email : '',
+    role: ({ BUSINESS_ADMIN: 'Business Admin', RECEPTIONIST: 'Receptionist', WASHER: 'Washer' })[row.role] || row.role,
+    branch: row.branch || 'Main branch',
+    status: row.status === 'ACTIVE' ? 'Active' : row.status === 'PENDING' ? 'Pending approval' : 'Inactive',
+    tenant_id: tenantId,
+  })).sort((a, b) => Number(b.status === 'Pending approval') - Number(a.status === 'Pending approval'));
+}
+
 export function dbMethod(method = 'CASH') {
   return ({ CASH: 'CASH', CARD: 'CARD', 'M-PESA': 'M-PESA', 'M-Pesa': 'M-PESA', WALLET: 'WALLET', LOYALTY: 'LOYALTY' })[method] || 'CASH';
 }

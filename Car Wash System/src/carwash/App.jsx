@@ -7,7 +7,7 @@ import {
   Settings, ShieldCheck, Share2, Sparkles, Store, Sun, Moon, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff, Trash2, Pencil
 } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
-import { dbMethod, loadLiveWorkspace } from './liveWorkspace.js';
+import { dbMethod, loadLiveStaff, loadLiveWorkspace } from './liveWorkspace.js';
 import {
   clearLegacyBrowserData, clearSession, demoUsers, formatKes, getSession, markUserSeen,
   newId, readDb, saveSession, todayLabel, wasUserSeen
@@ -145,6 +145,23 @@ export default function CarWashApp() {
     loadLiveWorkspace(user).then(({db:liveDb})=>{if(active)setDb(liveDb);}).catch((error)=>{if(active)setLiveError(userFacingErrorMessage(error,'Unable to load this business workspace. Refresh and try again.'));}).finally(()=>{if(active)setLiveLoading(false);});
     return()=>{active=false;};
   },[user?.authUserId,user?.tenant_id]);
+  useEffect(()=>{
+    if(!user?.authUserId||!user.tenant_id||user.role!=='Business Admin'||screen!=='staff')return undefined;
+    let active=true;let pending=false;
+    const refreshStaff=async()=>{
+      if(pending)return;
+      pending=true;
+      try{
+        const staff=await loadLiveStaff(user);
+        if(active)setDb((current)=>({...current,staff}));
+      }catch(error){
+        if(active)setLiveError(userFacingErrorMessage(error,'Unable to refresh team approvals.'));
+      }finally{pending=false;}
+    };
+    void refreshStaff();
+    const timer=window.setInterval(refreshStaff,5000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[user?.authUserId,user?.tenant_id,user?.role,screen]);
   useEffect(()=>{
     const pending=db.billing?.pendingRequest;
     if(!user?.authUserId||!user.tenant_id||pending?.request_type!=='PLAN_PURCHASE'||pending.mpesa_payment_status==='FAILED'||pending.mpesa_payment_status==='PAID')return undefined;
@@ -623,7 +640,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
   const inviteToken=new URLSearchParams(window.location.search).get('invite')||'';
   const portalParam=new URLSearchParams(window.location.search).get('portal');
   const staffPortal=window.location.pathname==='/washer'?'washer':window.location.pathname==='/receptionist'?'receptionist':['washer','receptionist'].includes(portalParam)?portalParam:'';
-  const isStaffInvite=inviteToken.length===64;
+  const isStaffInvite=/^[0-9a-f]{64}$/i.test(inviteToken);
   const isStaffPortal=Boolean(staffPortal);
   const portalName=staffPortal==='washer'?'Washer':staffPortal==='receptionist'?'Receptionist':'staff';
   const [mode,setMode]=useState(()=>isStaffInvite?'register':initialMode);
@@ -700,7 +717,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
       if(!supabaseBrowser)throw new Error('Sign-in is temporarily unavailable. Please try again later.');
       if(mode==='register'){
         if(form.password!==confirmPassword)throw new Error('Passwords do not match. Please check both password fields.');
-        const staffInvite=inviteToken.length===64;
+        const staffInvite=isStaffInvite;
         const metadata=staffInvite?{full_name:form.name.trim(),invite_token:inviteToken}:{full_name:form.name.trim(),business_name:form.business.trim(),phone:form.phone.trim()};
         const callback=new URL(window.location.origin);if(staffInvite){callback.pathname=staffPortal==='receptionist'?'/receptionist':'/washer';callback.searchParams.set('invite',inviteToken);callback.searchParams.set('portal',staffPortal||'washer');}
         const {data,error:signUpError}=await supabaseBrowser.auth.signUp({email:form.email.trim(),password:form.password,options:{emailRedirectTo:callback.toString(),data:metadata}});
@@ -725,7 +742,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     <div className="cw-login-visual"><div className="cw-login-nav"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span><ShieldCheck size={15}/> SECURE OPERATIONS</span></div><div className="cw-login-pitch"><span>{isStaffPortal?`OSHAHUB · ${portalName.toUpperCase()} APP`:'OSHAHUB · CAR WASH OPERATIONS'}</span><h1>{isStaffPortal?<>Sign in to the<br/>{portalName.toLowerCase()} app.</>:<>Every wash.<br/>Running smoothly.</>}</h1><p>{isStaffPortal?`Use your approved ${portalName.toLowerCase()} account to open your business workspace.`:'Run your car wash with a clear view of jobs, people and payments, all in one place.'}</p>{!isStaffPortal&&<><div className="cw-login-points"><div><Check size={15}/> Live wash queue</div><div><Check size={15}/> Customer loyalty</div><div><Check size={15}/> Clear earnings</div></div><div className="cw-pitch-products"><div><small>CONNECTED PORTALS</small><b>Owner · Front desk · Wash team</b></div><div><small>SUBSCRIPTION PLANS</small><b>Monthly · Quarterly · Annual · Custom</b></div></div></>}</div><div className="cw-login-legal">© 2026 OshaHub <span>{isStaffInvite?`${portalName} workspace invitation`:isStaffPortal?`${portalName} app`:'Made for the people who keep Kenya moving.'}</span></div></div>
     <div className="cw-login-panel"><div className="cw-login-mobile-logo"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/></div><div className="cw-login-content">{onBack&&!isStaffPortal&&<button type="button" className="cw-back-to-site" onClick={onBack}>← Back to OshaHub</button>}<span className="cw-login-kicker">{isStaffInvite?`${portalName.toUpperCase()} PORTAL INVITATION`:isStaffPortal?`${portalName.toUpperCase()} APP`:'WELCOME TO OSHAHUB'}</span><h2>{isStaffInvite?(mode==='register'?`Create your ${portalName} account.`:`Sign in to your ${portalName} portal.`):isStaffPortal?`Sign in to your ${portalName} app.`:mode==='register'?'Bring your wash online.':'Your wash floor, at a glance.'}</h2><p className="cw-login-intro">{isStaffInvite?`Register to join the business that invited you as a ${portalName}. Verify your email, then sign in to open that tenant’s ${portalName} workspace.`:isStaffPortal?`Sign in with the ${portalName.toLowerCase()} account approved by your business administrator.`:mode==='register'?'Register your business and its owner. After review, the owner receives Business Admin access and can invite staff.':'Sign in with your business or staff account to open your workspace.'}</p>{!isStaffPortal&&<div className="cw-auth-mobile-products"><b>Business · Front desk · Wash team</b><span>Flexible monthly, quarterly, annual and custom subscriptions</span></div>}
       <form className="cw-auth-form" onSubmit={submit}>
-        {mode==='register'&&<><label>{inviteToken.length===64?'Employee’s full name':'Owner’s full name'}<input autoComplete="name" placeholder="Enter full name" required minLength="2" value={form.name} onChange={(e)=>set('name',e.target.value)}/></label>{inviteToken.length!==64&&<><label>Business name<input placeholder="Enter business name" required minLength="2" value={form.business} onChange={(e)=>set('business',e.target.value)}/></label><label>Phone number<input autoComplete="tel" inputMode="tel" placeholder="Enter phone number" required minLength="7" value={form.phone} onChange={(e)=>set('phone',e.target.value)}/></label></>}</>}
+        {mode==='register'&&<><label>{isStaffInvite?'Employee’s full name':'Owner’s full name'}<input autoComplete="name" placeholder="Enter full name" required minLength="2" value={form.name} onChange={(e)=>set('name',e.target.value)}/></label>{!isStaffInvite&&<><label>Business name<input placeholder="Enter business name" required minLength="2" value={form.business} onChange={(e)=>set('business',e.target.value)}/></label><label>Phone number<input autoComplete="tel" inputMode="tel" placeholder="Enter phone number" required minLength="7" value={form.phone} onChange={(e)=>set('phone',e.target.value)}/></label></>}</>}
         <label>Email address<input type="email" autoComplete="email" placeholder="Enter email address" required value={form.email} onChange={(e)=>set('email',e.target.value)}/></label>
         <label>Password<div className="cw-password-wrap"><input type={showPassword?'text':'password'} autoComplete={mode==='login'?'current-password':'new-password'} placeholder="Enter password" required minLength="10" value={form.password} onChange={(e)=>set('password',e.target.value)}/><button type="button" className="cw-password-toggle" aria-label={showPassword?'Hide password':'Show password'} aria-pressed={showPassword} onClick={()=>setShowPassword((visible)=>!visible)}>{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>
         {mode==='register'&&<label>Confirm password<div className="cw-password-wrap"><input type={showConfirmPassword?'text':'password'} autoComplete="new-password" placeholder="Re-enter password" required minLength="10" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)}/><button type="button" className="cw-password-toggle" aria-label={showConfirmPassword?'Hide confirmation password':'Show confirmation password'} aria-pressed={showConfirmPassword} onClick={()=>setShowConfirmPassword((visible)=>!visible)}>{showConfirmPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>}
