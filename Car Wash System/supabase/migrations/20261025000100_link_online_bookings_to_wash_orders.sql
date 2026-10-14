@@ -2,6 +2,15 @@
 alter table public.carwash_orders
   add column if not exists scheduled_at timestamptz;
 
+-- These ownership columns are normally added by the staff-scope migration.
+-- Keep this migration safe on databases where that migration was not applied.
+alter table public.carwash_customers
+  add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.carwash_customers alter column created_by set default auth.uid();
+alter table public.carwash_vehicles
+  add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.carwash_vehicles alter column created_by set default auth.uid();
+
 alter table public.carwash_public_bookings
   add column if not exists wash_order_id uuid references public.carwash_orders(id) on delete set null;
 
