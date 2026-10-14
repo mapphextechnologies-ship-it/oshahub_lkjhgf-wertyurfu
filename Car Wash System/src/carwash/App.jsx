@@ -162,16 +162,17 @@ export default function CarWashApp() {
           ||previousSubscription?.starts_at!==currentSubscription?.starts_at
           ||previousSubscription?.ends_at!==currentSubscription?.ends_at;
         const tenantStatusChanged=db.tenants?.find((item)=>item.id===user.tenant_id)?.status!==liveTenant.status;
-        if(changed||tenantStatusChanged)setDb((current)=>{
+        const trialExtensionMarkerChanged=(db.billing?.trialExtensionUsedAt||null)!==(liveTenant.trial_extension_used_at||null);
+        if(changed||tenantStatusChanged||trialExtensionMarkerChanged)setDb((current)=>{
           if(current.activeTenantId!==user.tenant_id)return current;
           const plan=current.billing?.plans?.find((item)=>item.id===currentSubscription?.plan_id)||null;
           return {
             ...current,
             tenants:(current.tenants||[]).map((item)=>item.id===user.tenant_id?{...item,status:liveTenant.status,plan:plan?.name||item.plan,branches:currentSubscription?.branch_count||item.branches}:item),
-            billing:{...current.billing,subscriptions,currentSubscription,currentPlan:plan||current.billing?.currentPlan||null},
+            billing:{...current.billing,subscriptions,currentSubscription,currentPlan:plan||current.billing?.currentPlan||null,trialExtensionUsedAt:liveTenant.trial_extension_used_at||current.billing?.trialExtensionUsedAt||null},
           };
         });
-        if(changed&&currentSubscription?.status==='TRIAL'&&currentSubscription.id!==previousSubscription?.id){
+        if(changed&&currentSubscription?.status==='TRIAL'){
           setToast(`A new 7-day trial is active for ${user.tenant_name||'your business'}.`);
         }
         if(changed){
@@ -189,7 +190,7 @@ export default function CarWashApp() {
     const onVisible=()=>{if(document.visibilityState==='visible')void refreshBillingStatus();};
     document.addEventListener('visibilitychange',onVisible);
     return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',onVisible);};
-  },[user?.authUserId,user?.tenant_id,user?.role,user?.billingRestricted,db.activeTenantId,db.billing?.currentSubscription?.id,db.billing?.currentSubscription?.status,db.billing?.currentSubscription?.starts_at,db.billing?.currentSubscription?.ends_at]);
+  },[user?.authUserId,user?.tenant_id,user?.role,user?.billingRestricted,db.activeTenantId,db.billing?.currentSubscription?.id,db.billing?.currentSubscription?.status,db.billing?.currentSubscription?.starts_at,db.billing?.currentSubscription?.ends_at,db.billing?.trialExtensionUsedAt]);
   useEffect(()=>{
     if(!user?.authUserId||!user.tenant_id||user.role!=='Business Admin'||screen!=='staff')return undefined;
     let active=true;let pending=false;
@@ -900,7 +901,7 @@ function CustomerBillingPage({billing,tenant,onRequest,onRefresh}){
   const [phone,setPhone]=useState(''); const [busy,setBusy]=useState(false); const [paymentMessage,setPaymentMessage]=useState('');
   const [billingDrawerOpen,setBillingDrawerOpen]=useState(false);
   const current=billing?.currentSubscription; const plan=billing?.currentPlan; const pending=billing?.pendingRequest;
-  const trialRequestState=getTrialRequestState(current,billing?.requests||[],billing?.payments||[]);
+  const trialRequestState=getTrialRequestState(current,billing?.requests||[],billing?.payments||[],Date.now(),Boolean(billing?.trialExtensionUsedAt));
   const trialExpired=trialRequestState.trialExpired;
   const trial=current?.status==='TRIAL'&&!trialExpired;
   const subscriptionStatus=trialExpired?'EXPIRED':current?.status;
@@ -927,6 +928,7 @@ function CustomerBillingPage({billing,tenant,onRequest,onRefresh}){
     <PageHeading title="Plans & billing" subtitle="Choose your subscription, pay onboarding securely with M-Pesa, and review your payment history."/>
     <div className="cw-billing-current"><div><span>{trial?'FREE TRIAL':plan?.name?.toUpperCase()||'CURRENT SUBSCRIPTION'}</span><h2>{tenant?.name||'Your business'}</h2><p>{trial?`You have ${daysLeft} day${daysLeft===1?'':'s'} left in your free 7-day trial.`:current?`${plan?.name||'Your plan'} · ${current.branch_count||1} branch${current.branch_count===1?'':'es'} · ${subscriptionStatus} · Ends ${new Date(current.ends_at).toLocaleDateString('en-KE',{day:'numeric',month:'long',year:'numeric'})}`:'Choose a plan to continue using your workspace.'}</p></div><div className="cw-billing-current-mark"><ShieldCheck size={22}/><b>{subscriptionStatus||'NO PLAN'}</b></div></div>
     {trialEligible&&<div className="cw-billing-extension"><div><b>Need more time?</b><span>Request another 7-day trial. OshaHub will review the request and notify you in the app.</span></div><button className="cw-secondary" disabled={busy||Boolean(pending)} onClick={()=>submit({type:'TRIAL_EXTENSION'})}>{busy?'Sending…':'Request another 7 days'}</button></div>}
+    {trialExpired&&trialRequestState.trialExtensionGranted&&<div className="cw-note-box"><Clock3 size={17}/><span>Your one-time extra 7-day trial has already been used. Choose a paid plan to reopen your workspace or contact OshaHub administration for help.</span></div>}
     {trialRequestState.trialRequestPending&&<div className="cw-note-box"><Clock3 size={17}/><span>Your 7-day trial request is pending OshaHub review.</span></div>}
     <div className="cw-billing-plans-heading"><PageHeading title="Available plans" subtitle="Compare terms and features when you’re ready to choose."/><button type="button" className="cw-secondary cw-plans-disclosure" aria-expanded={showPlans} onClick={()=>setShowPlans((show)=>!show)}>{showPlans?'Hide plans':'View available plans'}<ChevronDown size={16}/></button></div>
     {showPlans&&<div className="cw-customer-plan-grid">{tierPlans.map((group,index)=><article className={`cw-customer-plan ${group.options.some((item)=>item.id===effectiveSelectedPlan)?'selected':''}`} key={group.tier}><span className="cw-service-category">OSHAHUB {group.tier.toUpperCase()}</span><h3>{group.tier}</h3><strong>{formatKes(group.monthly)}<small> / month</small></strong><button className="cw-primary" aria-expanded={expandedTier===group.tier} onClick={()=>setExpandedTier(expandedTier===group.tier?'':group.tier)}>{expandedTier===group.tier?'Hide plan':'View plan'}</button>{expandedTier===group.tier&&<div className="cw-customer-plan-details"><p>{group.features}</p><span className="cw-service-category">CHOOSE A SUBSCRIPTION TERM</span><div className="cw-plan-term-options">{OSHAHUB_TERMS.map(([label,months])=>{const option=group.options.find((item)=>item.months===months);const price=months===1?group.monthly:(group.monthly-300)*months;return <button type="button" key={label} className={effectiveSelectedPlan===option?.id?'active':''} disabled={!option||Boolean(lockedPlanId)} onClick={()=>{if(option&&!lockedPlanId){setSelectedPlan(option.id);setShowPlans(false);setBillingDrawerOpen(true);if(option.branchLimit===1)setHasMultipleBranches(false);}}}><b>{label}</b><span>{formatKes(price)}</span>{months>1&&<small>Save {formatKes(300*months)}</small>}</button>})}</div></div>}</article>)}</div>}

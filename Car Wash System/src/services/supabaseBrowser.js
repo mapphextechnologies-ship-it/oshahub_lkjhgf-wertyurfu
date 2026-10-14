@@ -59,6 +59,9 @@ export function userFacingErrorMessage(error, fallback = 'Something went wrong. 
   if (/platform administrator access is required/.test(normalized)) {
     return 'The database does not recognize this login as an active Super Admin. Verify its global membership in the same Supabase project used by this app.';
   }
+  if (/one-time extra 7-day trial|trial extension.*already|extra 7-day trial.*used/.test(normalized)) {
+    return 'This business has already used its one-time extra 7-day trial. Choose a paid plan or contact OshaHub administration.';
+  }
   if (/business administrator access is required|active business administrator access is required/.test(normalized)) {
     return 'The database does not recognize this login as an active Business Admin for this workspace. Check its membership and selected business.';
   }

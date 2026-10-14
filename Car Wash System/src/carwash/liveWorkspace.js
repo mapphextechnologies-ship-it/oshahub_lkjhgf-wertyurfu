@@ -11,11 +11,13 @@ export async function loadLiveWorkspace(user) {
   const isWasher = user.role === 'Washer';
   const canSeeMoney = ['Business Admin', 'Receptionist'].includes(user.role);
   let tenantSettingsReady = true;
-  let tenantRes = await supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status,settings').eq('id', tenantId).single();
-  if (tenantRes.error && /settings/i.test(tenantRes.error.message || '')
+  let tenantRes = await supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status,settings,trial_extension_used_at').eq('id', tenantId).single();
+  if (tenantRes.error && /settings|trial_extension_used_at/i.test(tenantRes.error.message || '')
     && (['42703', 'PGRST204'].includes(tenantRes.error.code) || /does not exist|schema cache/i.test(tenantRes.error.message || ''))) {
-    tenantSettingsReady = false;
-    tenantRes = await supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status').eq('id', tenantId).single();
+    const settingsColumnMissing = /settings/i.test(tenantRes.error.message || '');
+    tenantSettingsReady = !settingsColumnMissing;
+    const columns = settingsColumnMissing ? 'id,name,owner_name,status' : 'id,name,owner_name,status,settings';
+    tenantRes = await supabaseBrowser.from('carwash_tenants').select(columns).eq('id', tenantId).single();
   }
   const [staffRes, serviceRes, customerRes, vehicleRes, orderRes, orderServiceRes, paymentRes, commissionRes, loyaltyRes, auditRes, plansRes, subscriptionsRes, subscriptionPaymentsRes, billingRequestsRes] = await Promise.all([
     supabaseBrowser.from('carwash_memberships').select('id,role,full_name,phone,branch,status,user_id').eq('tenant_id', tenantId),
@@ -71,9 +73,10 @@ export async function loadLiveWorkspace(user) {
   const currentSubscription = subscriptions[0] || null;
   const currentPlan = plansRes.data.find((row) => row.id === currentSubscription?.plan_id) || null;
   const billingRequests = billingRequestsRes.error ? [] : billingRequestsRes.data || [];
-  const trialRequestState = getTrialRequestState(currentSubscription, billingRequests, subscriptionPayments);
+  const trialExtensionUsedAt = tenant.trial_extension_used_at || null;
+  const trialRequestState = getTrialRequestState(currentSubscription, billingRequests, subscriptionPayments, Date.now(), Boolean(trialExtensionUsedAt));
   const pendingRequest = billingRequests.find((row) => row.status === 'PENDING') || null;
-  const billing = { plans, subscriptions, payments: subscriptionPayments, currentSubscription, currentPlan, onboardingFee: 8500, onboardingFeeDue: subscriptionPayments.length === 0, requests: billingRequests, trialExtensionRequested: trialRequestState.trialRequestPending, ...trialRequestState, pendingRequest };
+  const billing = { plans, subscriptions, payments: subscriptionPayments, currentSubscription, currentPlan, onboardingFee: 8500, onboardingFeeDue: subscriptionPayments.length === 0, requests: billingRequests, trialExtensionUsedAt, trialExtensionRequested: trialRequestState.trialRequestPending, ...trialRequestState, pendingRequest };
   return { tenant, db: { activeTenantId: tenantId, tenants: [{ id: tenantId, name: tenant.name, owner: tenant.owner_name, plan: currentPlan?.name || user.planName || 'Free trial', status: tenant.status, branches: currentSubscription?.branch_count || 1 }], staff, services, customers, vehicles, jobs, payments, commissions, loyalty: [], audit, billing, settingsSchemaReady: tenantSettingsReady, settings: { businessName: tenant.name, branch: settings.branch || user.branch || 'Main branch', currency: 'KES', loyaltyRate: Number(settings.loyaltyRate ?? 1) } } };
 }
 
@@ -102,10 +105,12 @@ export async function loadLiveStaff(user) {
 export async function loadLiveBillingStatus(user) {
   const tenantId = user?.tenant_id;
   if (!tenantId) throw new Error('This account has no business workspace assigned.');
-  const [tenantRes, subscriptionsRes] = await Promise.all([
-    supabaseBrowser.from('carwash_tenants').select('id,status').eq('id', tenantId).single(),
-    supabaseBrowser.from('carwash_subscriptions').select('*').eq('tenant_id', tenantId).order('starts_at', { ascending: false }),
-  ]);
+  let tenantRes = await supabaseBrowser.from('carwash_tenants').select('id,status,trial_extension_used_at').eq('id', tenantId).single();
+  if (tenantRes.error && /trial_extension_used_at/i.test(tenantRes.error.message || '')
+    && (['42703', 'PGRST204'].includes(tenantRes.error.code) || /does not exist|schema cache/i.test(tenantRes.error.message || ''))) {
+    tenantRes = await supabaseBrowser.from('carwash_tenants').select('id,status').eq('id', tenantId).single();
+  }
+  const subscriptionsRes = await supabaseBrowser.from('carwash_subscriptions').select('*').eq('tenant_id', tenantId).order('starts_at', { ascending: false });
   if (tenantRes.error) throw tenantRes.error;
   if (subscriptionsRes.error) throw subscriptionsRes.error;
   return { tenant: tenantRes.data, subscriptions: subscriptionsRes.data || [] };
