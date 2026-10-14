@@ -4,7 +4,7 @@ import {
   Bell, CalendarDays, CarFront, Check, CheckCircle2, ChevronDown, ChevronRight, Copy,
   CircleDollarSign, Clock3, CreditCard, Droplets, FileBarChart2, Gauge,
   Download, History, LayoutDashboard, Languages, LogOut, Menu, MoreHorizontal, Play, Plus, Search,
-  Settings, ShieldCheck, Share2, Sparkles, Store, Sun, Moon, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff, Trash2, Pencil
+  Settings, ShieldCheck, Share2, Sparkles, Store, Sun, Moon, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff, Trash2, Pencil, Camera
 } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
 import SearchableTables from '../components/SearchableTables.jsx';
@@ -100,7 +100,7 @@ export default function CarWashApp() {
     return()=>{window.removeEventListener('beforeinstallprompt',captureInstallPrompt);window.removeEventListener('appinstalled',installed);};
   },[]);
   useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
-  useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const preference=data?.user?.user_metadata?.oshaHubTheme;if(['light','dark'].includes(preference))setTheme(preference);}});return()=>{active=false;};},[user?.authUserId]);
+  useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const metadata=data?.user?.user_metadata||{};if(['light','dark'].includes(metadata.oshaHubTheme))setTheme(metadata.oshaHubTheme);if(metadata.oshaHubAvatar){setUser((current)=>current?.authUserId===user.authUserId?{...current,profilePhoto:metadata.oshaHubAvatar}:current);}}});return()=>{active=false;};},[user?.authUserId]);
   useEffect(()=>{
     if(!user)return;
     try{
@@ -368,6 +368,11 @@ export default function CarWashApp() {
     notify(`${role} app link copied.`);
   }
   async function changeTheme(nextTheme){setTheme(nextTheme);if(!user?.authUserId||!supabaseBrowser)return;try{const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubTheme:nextTheme}});if(error)notify('Theme updated on this device, but could not sync to your OshaHub account.');}catch{notify('Theme updated on this device, but could not sync to your OshaHub account.');}}
+  async function changeProfilePhoto(photo){
+    if(user?.authUserId&&supabaseBrowser){const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo||null}});if(error)throw error;}
+    else {try{const key=`osha-cw-avatar:${user?.email||'guest'}`;if(photo)window.localStorage.setItem(key,photo);else window.localStorage.removeItem(key);}catch{throw new Error('Could not save the profile picture on this device.');}}
+    const next={...user,profilePhoto:photo||''};setUser(next);saveSession(next);
+  }
   function updateAppPreferences(changes){setAppPreferences((old)=>{const next={...old,...changes};try{window.localStorage.setItem(preferenceKey(user?.authUserId||user?.email||'guest'),JSON.stringify(next));}catch{}return next;});}
   async function saveOwnProfile(form){
     const fullName=form.name.trim(),phone=form.phone.trim(),branch=form.branch.trim();
@@ -640,7 +645,7 @@ export default function CarWashApp() {
         {screen==='tenants'&&<TenantsPage tenants={db.tenants} onAdd={()=>setModal('tenant')} onChange={(item,status)=>patchDb((next)=>{const row=next.tenants.find((x)=>x.id===item.id);if(row)row.status=status;return next;})}/>}
         {screen==='plans'&&<PlansPage plans={db.plans||[]} tenants={db.tenants} onAdd={()=>setModal('plan')}/>}
         {screen==='audit'&&<AuditPage rows={scoped(db.audit)}/>}
-        {screen==='settings'&&<SettingsPage db={db} user={user} role={role} theme={theme} appPreferences={appPreferences} onPreferenceChange={updateAppPreferences} onThemeChange={changeTheme} onCopyPortalLink={copyPortalAppLink} onInstallApp={installApp} onSaveProfile={saveOwnProfile} onNavigate={navigate} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Settings are temporarily unavailable. Contact support if the problem continues.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(userFacingErrorMessage(error,'Could not update business settings. Check the details and try again.'));return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
+        {screen==='settings'&&<SettingsPage db={db} user={user} role={role} theme={theme} appPreferences={appPreferences} onPreferenceChange={updateAppPreferences} onThemeChange={changeTheme} onChangeProfilePhoto={changeProfilePhoto} onCopyPortalLink={copyPortalAppLink} onInstallApp={installApp} onSaveProfile={saveOwnProfile} onNavigate={navigate} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Settings are temporarily unavailable. Contact support if the problem continues.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(userFacingErrorMessage(error,'Could not update business settings. Check the details and try again.'));return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
         {screen==='profile'&&<ProfilePage user={user} tenant={tenant} onLogout={logout}/>}
       </section>
     </main>
@@ -986,7 +991,7 @@ function CustomerBillingPage({billing,tenant,onRequest,onRefresh}){
 
 function AuditPage({rows}){return <><PageHeading title="Audit & security" subtitle="Recent operational events and sensitive account activity."/><div className="cw-security-banner"><ShieldCheck size={23}/><span><b>Tenant isolation is enforced</b><small>Business records are scoped to the signed in workspace.</small></span><StatusPill status="ACTIVE"/></div><div className="cw-panel cw-table-panel"><div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>EVENT</th><th>DETAIL</th><th>TIME</th><th>RESULT</th></tr></thead><tbody>{rows.map((row)=><tr key={row.id}><td><b>{row.action}</b></td><td>{row.detail}</td><td>{row.time}</td><td><span className="cw-pay-state paid"><CheckCircle2 size={13}/> Recorded</span></td></tr>)}</tbody></table></div></div></>}
 
-function SettingsPage({db,user,role,onSave,theme,onThemeChange,onCopyPortalLink,onInstallApp,appPreferences,onPreferenceChange,onSaveProfile,onNavigate}){
+function SettingsPage({db,user,role,onSave,theme,onThemeChange,onChangeProfilePhoto,onCopyPortalLink,onInstallApp,appPreferences,onPreferenceChange,onSaveProfile,onNavigate}){
   const [name,setName]=useState(user?.name||'');
   const [phone,setPhone]=useState(user?.phone||'');
   const [profileBranch,setProfileBranch]=useState(user?.branch||db.settings.branch||'Main branch');
@@ -998,6 +1003,8 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange,onCopyPortalLink,
   const [confirmPassword,setConfirmPassword]=useState('');
   const [accountBusy,setAccountBusy]=useState(false);
   const [profileBusy,setProfileBusy]=useState(false);
+  const [photoBusy,setPhotoBusy]=useState(false);
+  const [profilePhoto,setProfilePhoto]=useState(user?.profilePhoto||'');
   const [accountMessage,setAccountMessage]=useState('');
   const [accountError,setAccountError]=useState('');
   const [profileMessage,setProfileMessage]=useState('');
@@ -1005,13 +1012,27 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange,onCopyPortalLink,
   const isBusinessAdmin=role==='Business Admin';
   const isReceptionist=role==='Receptionist';
   const isWasher=role==='Washer';
-  const accessSummary=isBusinessAdmin?'Manage this business workspace and its team.':isReceptionist?'Manage the wash queue, customer records and front-desk payments.':'View and update assigned wash jobs. Business finance screens are restricted to the business admin and front desk.';
+  const photoInput=useRef(null);
   async function saveProfile(event){
     event.preventDefault();setProfileMessage('');setProfileError('');setProfileBusy(true);
     try{await onSaveProfile({name,phone,branch:profileBranch});setProfileMessage('Profile saved.');}
     catch(error){setProfileError(userFacingErrorMessage(error,'Could not save your profile. Check the details and try again.'));}
     finally{setProfileBusy(false);}
   }
+  async function updatePhoto(file){
+    if(!file)return;
+    if(!file.type.startsWith('image/')){setProfileError('Choose an image file.');return;}
+    if(file.size>8*1024*1024){setProfileError('Choose an image smaller than 8 MB.');return;}
+    setPhotoBusy(true);setProfileError('');
+    try{
+      const image=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('This image could not be opened.'));img.src=String(reader.result);};reader.onerror=()=>reject(new Error('This image could not be read.'));reader.readAsDataURL(file);});
+      const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;const ctx=canvas.getContext('2d');
+      const scale=Math.max(256/image.width,256/image.height),width=image.width*scale,height=image.height*scale;ctx.drawImage(image,(256-width)/2,(256-height)/2,width,height);
+      const photo=canvas.toDataURL('image/jpeg',.78);await onChangeProfilePhoto(photo);setProfilePhoto(photo);
+    }catch(error){setProfileError(userFacingErrorMessage(error,'Could not update your profile picture.'));}
+    finally{setPhotoBusy(false);if(photoInput.current)photoInput.current.value='';}
+  }
+  async function removePhoto(){setPhotoBusy(true);setProfileError('');try{await onChangeProfilePhoto('');setProfilePhoto('');}catch(error){setProfileError(userFacingErrorMessage(error,'Could not remove your profile picture.'));}finally{setPhotoBusy(false);}}
   async function updateAccount(event){
     event.preventDefault();setAccountMessage('');setAccountError('');
     const emailChanged=accountEmail.trim().toLowerCase()!==(user?.email||'').toLowerCase();
@@ -1026,61 +1047,63 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange,onCopyPortalLink,
     setNewPassword('');setConfirmPassword('');
     setAccountMessage(emailChanged?'Check your new email address for a confirmation link. The change takes effect after you confirm it.':'Your password has been changed.');
   }
+  const initials=(name||user?.email||'OH').trim().split(/\s+/).map((part)=>part[0]).slice(0,2).join('').toUpperCase();
   return <>
-    <PageHeading title="Workspace settings" subtitle={`Personal and workspace preferences for ${role}.`}/>
-    <div className="cw-settings-grid cw-settings-workspace">
-      <section className="cw-panel cw-settings-panel cw-preference-panel">
-        <div className="cw-panel-head"><div><h2>Profile</h2><p>Keep your contact and branch details current.</p></div></div>
-        <form onSubmit={saveProfile} className="cw-settings-form">
-          <label className="cw-form-label">NAME<input autoComplete="name" required minLength="2" maxLength="120" value={name} onChange={(event)=>setName(event.target.value)}/></label>
-          <label className="cw-form-label">ROLE<input value={role} readOnly/></label>
-          <label className="cw-form-label">PHONE<input type="tel" autoComplete="tel" value={phone} onChange={(event)=>setPhone(event.target.value)} placeholder="Add your phone number"/></label>
-          <label className="cw-form-label">BRANCH<input required minLength="2" maxLength="120" value={profileBranch} onChange={(event)=>setProfileBranch(event.target.value)}/></label>
-          {profileError&&<p className="cw-account-feedback error" role="alert">{profileError}</p>}
+    <PageHeading title="Settings" subtitle="Your profile, preferences and account access."/>
+    <div className="cw-settings-page">
+      <header className="cw-settings-profile-card">
+        <div className="cw-settings-identity"><div className="cw-settings-avatar">{profilePhoto?<img src={profilePhoto} alt="Profile"/>:initials}</div><strong>{name||user?.name}</strong><span>{role}</span></div>
+        <div className="cw-settings-photo-actions"><input ref={photoInput} type="file" accept="image/*" hidden onChange={(event)=>updatePhoto(event.target.files?.[0])}/><button type="button" className="cw-secondary" disabled={photoBusy} onClick={()=>photoInput.current?.click()}><Camera size={16}/>{photoBusy?'Saving…':'Add profile picture'}</button>{profilePhoto&&<button type="button" className="cw-danger-outline" disabled={photoBusy} onClick={removePhoto}><Trash2 size={16}/>Delete profile picture</button>}</div>
+      </header>
+      {profileError&&<p className="cw-account-feedback error" role="alert">{profileError}</p>}
+      <SettingsGroup title="Appearance">
+        <SettingsRow icon={Sparkles} label="Theme"><div className="cw-choice-row"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><Sun size={15}/> Light</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><Moon size={15}/> Dark</button></div></SettingsRow>
+        <SettingsRow icon={Settings} label="App layout"><div className="cw-choice-row"><button type="button" className={!appPreferences.compactView?'selected':''} aria-pressed={!appPreferences.compactView} onClick={()=>onPreferenceChange({compactView:false})}>App view</button><button type="button" className={appPreferences.compactView?'selected':''} aria-pressed={appPreferences.compactView} onClick={()=>onPreferenceChange({compactView:true})}>Compact</button></div></SettingsRow>
+        <SettingsRow icon={Download} label="Install app"><button type="button" className="cw-settings-row-action" onClick={onInstallApp}>Install app <ChevronRight size={17}/></button></SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup title="Profile">
+        <form onSubmit={saveProfile} className="cw-settings-rows-form">
+          <SettingsRow icon={UserRound} label="Name"><input autoComplete="name" required minLength="2" maxLength="120" value={name} onChange={(event)=>setName(event.target.value)}/></SettingsRow>
+          <SettingsRow icon={UserRound} label="Role"><input value={role} readOnly/></SettingsRow>
+          <SettingsRow icon={UserRound} label="Phone"><input type="tel" autoComplete="tel" value={phone} onChange={(event)=>setPhone(event.target.value)} placeholder="Add your phone number"/></SettingsRow>
+          <SettingsRow icon={Store} label="Branch"><input required minLength="2" maxLength="120" value={profileBranch} onChange={(event)=>setProfileBranch(event.target.value)}/></SettingsRow>
           {profileMessage&&<p className="cw-account-feedback success" role="status">{profileMessage}</p>}
-          <button className="cw-primary" disabled={profileBusy}>{profileBusy?'Saving…':'Save profile'} <Check size={16}/></button>
+          <div className="cw-settings-save"><button type="submit" className="cw-primary" disabled={profileBusy}>{profileBusy?'Saving…':'Save'}</button></div>
         </form>
-      </section>
-      {isBusinessAdmin&&<div className="cw-panel cw-settings-panel cw-preference-panel">
-        <div className="cw-panel-head"><div><h2>Business profile</h2><p>Workspace identity and branch settings.</p></div></div>
-        <label className="cw-form-label">BUSINESS NAME<input value={businessName} onChange={(event)=>setBusinessName(event.target.value)}/></label>
-        <label className="cw-form-label">PRIMARY BRANCH<input value={branch} onChange={(event)=>setBranch(event.target.value)}/></label>
-        <label className="cw-form-label">LOYALTY EARN RATE<input type="number" min="0" value={rate} onChange={(event)=>setRate(event.target.value)}/><small>Points awarded for each KES spent on a closed order.</small></label>
-        <button className="cw-primary" onClick={()=>onSave({businessName,branch,loyaltyRate:Math.max(0,K(rate))})}>Save business settings <Check size={16}/></button>
-      </div>}
-      <section className="cw-panel cw-settings-panel cw-preference-panel">
-        <div className="cw-panel-head"><div><h2>App layout & appearance</h2><p>Choose a theme and comfortable or compact spacing for this device.</p></div></div>
-        <div className="cw-settings-field"><span>Theme</span><div className="cw-choice-row"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><Sun size={15}/> Light</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><Moon size={15}/> Dark</button></div></div>
-        <div className="cw-settings-field"><span>App view</span><div className="cw-choice-row"><button type="button" className={!appPreferences.compactView?'selected':''} aria-pressed={!appPreferences.compactView} onClick={()=>onPreferenceChange({compactView:false})}>Comfortable</button><button type="button" className={appPreferences.compactView?'selected':''} aria-pressed={appPreferences.compactView} onClick={()=>onPreferenceChange({compactView:true})}>Compact</button></div></div>
-        <div className="cw-settings-install"><span><b>Get OshaHub on this device</b><small>Add the workspace to your home screen for quick access.</small></span><button type="button" className="cw-secondary" onClick={onInstallApp}><Download size={15}/> Install app</button></div>
-        {(isWasher||isReceptionist)&&<button type="button" className="cw-text-action cw-settings-link" onClick={onCopyPortalLink}><Copy size={14}/> Copy {role.toLowerCase()} app link</button>}
-      </section>
-      <section className="cw-panel cw-settings-panel cw-preference-panel">
-        <div className="cw-panel-head"><div><h2>Notifications</h2><p>Choose which alerts appear in your notification center on this device.</p></div></div>
+      </SettingsGroup>
+      {isBusinessAdmin&&<SettingsGroup title="Business profile">
+        <SettingsRow icon={Store} label="Business name"><input value={businessName} onChange={(event)=>setBusinessName(event.target.value)}/></SettingsRow>
+        <SettingsRow icon={Store} label="Primary branch"><input value={branch} onChange={(event)=>setBranch(event.target.value)}/></SettingsRow>
+        <SettingsRow icon={BadgeCheck} label="Loyalty earn rate"><input type="number" min="0" value={rate} onChange={(event)=>setRate(event.target.value)}/></SettingsRow>
+        <div className="cw-settings-save"><button className="cw-primary" onClick={()=>onSave({businessName,branch,loyaltyRate:Math.max(0,K(rate))})}>Save business settings</button></div>
+      </SettingsGroup>}
+      <SettingsGroup title="Notifications">
         {(isBusinessAdmin||isReceptionist)&&<PreferenceToggle label="Payment alerts" detail="Unpaid orders, receipts and payment updates." checked={appPreferences.paymentAlerts} onChange={(value)=>onPreferenceChange({paymentAlerts:value})}/>}
         {isBusinessAdmin&&<PreferenceToggle label="Overdue alerts" detail="Subscription and workspace access reminders." checked={appPreferences.overdueAlerts} onChange={(value)=>onPreferenceChange({overdueAlerts:value})}/>}
         {isWasher&&<PreferenceToggle label="Commission alerts" detail="Commission and payout messages when available." checked={appPreferences.commissionAlerts} onChange={(value)=>onPreferenceChange({commissionAlerts:value})}/>}
-      </section>
-      <section className="cw-panel cw-settings-panel cw-preference-panel">
-        <div className="cw-panel-head"><div><h2>Security & access</h2><p>Sign-in controls and workspace permissions.</p></div></div>
-        <div className="cw-settings-row"><span><b>App access</b><small>{accessSummary}</small></span><span className="cw-setting-value">{isWasher?'Finance team only':isReceptionist?'Front desk':'Business admin'}</span></div>
-        <label className="cw-settings-row"><span><b>Session timeout</b><small>Sign out after no activity.</small></span><select value={appPreferences.sessionTimeout} onChange={(event)=>onPreferenceChange({sessionTimeout:Number(event.target.value)})}><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
-        <div className="cw-settings-row"><span><b>Sign-in verification</b><small>Verification requirements are managed by the workspace authentication settings.</small></span><span className="cw-setting-value">Managed</span></div>
-        <div className="cw-settings-row"><span><b>Device lock</b><small>Use your phone or computer’s screen lock to protect this app.</small></span><span className="cw-setting-value">Device setting</span></div>
-      </section>
-      <section className="cw-panel cw-settings-panel cw-account-security cw-preference-panel">
-        <div className="cw-panel-head"><div><h2>Password and account</h2><p>Change the password or sign-in email for your own account.</p></div></div>
-        {user?.authUserId?<form onSubmit={updateAccount}><label className="cw-form-label">ACCOUNT EMAIL<input type="email" autoComplete="email" required value={accountEmail} onChange={(event)=>setAccountEmail(event.target.value)}/><small>A confirmation link is required before changing your email.</small></label><label className="cw-form-label">NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={newPassword} onChange={(event)=>setNewPassword(event.target.value)} placeholder="Leave blank to keep your current password"/></label><label className="cw-form-label">CONFIRM NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={confirmPassword} onChange={(event)=>setConfirmPassword(event.target.value)} placeholder="Enter the new password again"/></label>{accountError&&<p className="cw-account-feedback error" role="alert">{accountError}</p>}{accountMessage&&<p className="cw-account-feedback success" role="status">{accountMessage}</p>}<button className="cw-primary" disabled={accountBusy}>{accountBusy?'Updating account…':'Change password / email'} <Check size={16}/></button></form>:<p className="cw-settings-help">Password changes are available for signed-in workspace accounts.</p>}
-      </section>
-      <section className="cw-panel cw-settings-panel cw-preference-panel cw-settings-access">
-        <div className="cw-panel-head"><div><h2>Workspace & help</h2><p>Current account scope and role-specific help.</p></div></div>
-        <div className="cw-settings-row"><span><b>Business</b><small>Current workspace</small></span><span className="cw-setting-value">{db.settings.businessName}</span></div>
-        <div className="cw-settings-row"><span><b>Branch</b><small>Assigned work location</small></span><span className="cw-setting-value">{profileBranch}</span></div>
-        <div className="cw-settings-row"><span><b>Help</b><small>{isBusinessAdmin?'Review account activity and security events.':'Contact your Business Admin for account, branch or access changes.'}</small></span><div className="cw-settings-help-actions"><a className="cw-secondary" href="/#faq" target="_blank" rel="noreferrer">Help center</a>{isBusinessAdmin&&<button type="button" className="cw-secondary" onClick={()=>onNavigate('audit')}><History size={15}/> View activity</button>}</div></div>
-      </section>
+      </SettingsGroup>
+      <SettingsGroup title="Security">
+        <SettingsRow icon={ShieldCheck} label="App access"><span className="cw-setting-value">{isWasher?'Finance team only':isReceptionist?'Front desk':'Business admin'}</span></SettingsRow>
+        <SettingsRow icon={ShieldCheck} label="OTP sign-in"><span className="cw-setting-value">Managed by account security</span></SettingsRow>
+        <SettingsRow icon={Clock3} label="Session timeout"><select value={appPreferences.sessionTimeout} onChange={(event)=>onPreferenceChange({sessionTimeout:Number(event.target.value)})}><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></SettingsRow>
+        <SettingsRow icon={ShieldCheck} label="Device lock"><span className="cw-setting-value">Use your device screen lock</span></SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup title="Account">
+        {user?.authUserId?<form onSubmit={updateAccount} className="cw-settings-account-form"><label className="cw-form-label">ACCOUNT EMAIL<input type="email" autoComplete="email" required value={accountEmail} onChange={(event)=>setAccountEmail(event.target.value)}/><small>Email changes require confirmation.</small></label><label className="cw-form-label">NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={newPassword} onChange={(event)=>setNewPassword(event.target.value)} placeholder="Leave blank to keep current password"/></label><label className="cw-form-label">CONFIRM NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={confirmPassword} onChange={(event)=>setConfirmPassword(event.target.value)} placeholder="Enter the password again"/></label>{accountError&&<p className="cw-account-feedback error" role="alert">{accountError}</p>}{accountMessage&&<p className="cw-account-feedback success" role="status">{accountMessage}</p>}<button className="cw-primary" disabled={accountBusy}>{accountBusy?'Updating…':'Change password'}</button></form>:<p className="cw-settings-help">Password changes are available for signed-in workspace accounts.</p>}
+      </SettingsGroup>
+      <SettingsGroup title="Help">
+        <SettingsRow icon={Store} label="Business"><span className="cw-setting-value">{db.settings.businessName}</span></SettingsRow>
+        <SettingsRow icon={Store} label="Branch"><span className="cw-setting-value">{profileBranch}</span></SettingsRow>
+        <SettingsRow icon={History} label="Audit trail"><button type="button" className="cw-settings-row-action" onClick={()=>onNavigate('audit')}>View activity <ChevronRight size={17}/></button></SettingsRow>
+        <SettingsRow icon={UserRound} label="Contact support"><a className="cw-settings-row-action" href="/#faq" target="_blank" rel="noreferrer">Help center <ChevronRight size={17}/></a></SettingsRow>
+        {(isWasher||isReceptionist)&&<SettingsRow icon={Copy} label="Workspace app link"><button type="button" className="cw-settings-row-action" onClick={onCopyPortalLink}>Copy {role.toLowerCase()} link <ChevronRight size={17}/></button></SettingsRow>}
+      </SettingsGroup>
     </div>
   </>;
 }
+
+function SettingsGroup({title,children}){return <section className="cw-settings-group"><h2>{title}</h2><div className="cw-settings-card">{children}</div></section>}
+function SettingsRow({icon:Icon,label,children}){return <div className="cw-settings-row-shot"><span className="cw-settings-row-icon"><Icon size={19}/></span><b>{label}</b><div className="cw-settings-row-control">{children}</div></div>}
 
 function PreferenceToggle({label,detail,checked,onChange}){return <label className="cw-preference-toggle"><span><b>{label}</b><small>{detail}</small></span><span className="cw-toggle-control"><small>{checked?'On':'Off'}</small><input type="checkbox" checked={checked} onChange={(event)=>onChange(event.target.checked)}/></span></label>}
 
