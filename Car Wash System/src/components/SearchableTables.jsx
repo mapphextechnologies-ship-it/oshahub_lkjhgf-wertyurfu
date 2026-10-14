@@ -8,12 +8,12 @@ export default function SearchableTables() {
     const enhance = (root = document) => {
       root.querySelectorAll?.(TABLE_SELECTOR).forEach((tableWrap) => {
         if (tableWrap.querySelector(':scope > .searchable-table-field')) return;
+        tableWrap.classList.add('has-table-search');
         const field = document.createElement('label');
         field.className = 'searchable-table-field';
         const icon = document.createElement('span');
         icon.className = 'searchable-table-icon';
         icon.setAttribute('aria-hidden', 'true');
-        icon.textContent = '⌕';
         const input = document.createElement('input');
         input.type = 'search';
         input.placeholder = 'Search this table…';

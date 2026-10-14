@@ -7,6 +7,9 @@
   min-height: 40px;
   margin: 0 0 10px;
   padding: 0 12px;
+  position: sticky;
+  top: 0;
+  z-index: 4;
   border: 1px solid #dce5df;
   border-radius: 9px;
   background: #fff;
@@ -14,8 +17,34 @@
 }
 
 .searchable-table-icon {
-  font-size: 22px;
-  line-height: 1;
+  position: relative;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.searchable-table-icon::before {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border: 1.7px solid currentColor;
+  border-radius: 50%;
+  content: '';
+}
+
+.searchable-table-icon::after {
+  position: absolute;
+  top: 11px;
+  left: 11px;
+  width: 5px;
+  height: 1.7px;
+  border-radius: 2px;
+  background: currentColor;
+  content: '';
+  transform: rotate(45deg);
+  transform-origin: left center;
 }
 
 .searchable-table-field input {
@@ -31,6 +60,16 @@
 
 .searchable-table-field input::placeholder {
   color: #8b98a6;
+}
+
+.searchable-table-field:focus-within {
+  border-color: #79bb8a;
+  box-shadow: 0 0 0 3px #188c4214;
+}
+
+.cw-table-wrap.has-table-search .cw-table thead,
+.pa-table-wrap.has-table-search table thead {
+  top: 50px;
 }
 
 [data-search-empty='true']::after {
@@ -49,4 +88,10 @@
 
 .theme-dark .searchable-table-field input {
   color: #edf4f2;
+}
+
+@media (max-width: 560px) {
+  .searchable-table-field {
+    width: 100%;
+  }
 }
