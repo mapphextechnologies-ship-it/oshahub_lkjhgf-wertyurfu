@@ -4,6 +4,7 @@ import { App } from './App.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import './styles.css';
 import './carwash/carwash.css';
+import './system-vibe.css';
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {

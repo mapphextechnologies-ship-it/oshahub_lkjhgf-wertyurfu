@@ -156,7 +156,7 @@ export default function CarWashApp() {
         {const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
         const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
         if(messageError)throw messageError;
-        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,phone:membership.phone||'',role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch||'',billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
+        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,phone:membership.phone||'',profilePhoto:authUser.user_metadata?.oshaHubAvatar||'',role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch||'',billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
       }catch(error){if(active)setAuthRestoreError(supabaseErrorMessage(error,'Unable to reconnect your workspace. Check your connection and retry.'));}
       finally{if(active)setAuthLoading(false);}
     };
@@ -369,9 +369,12 @@ export default function CarWashApp() {
   }
   async function changeTheme(nextTheme){setTheme(nextTheme);if(!user?.authUserId||!supabaseBrowser)return;try{const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubTheme:nextTheme}});if(error)notify('Theme updated on this device, but could not sync to your OshaHub account.');}catch{notify('Theme updated on this device, but could not sync to your OshaHub account.');}}
   async function changeProfilePhoto(photo){
-    if(user?.authUserId&&supabaseBrowser){const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo||null}});if(error)throw error;}
-    else {try{const key=`osha-cw-avatar:${user?.email||'guest'}`;if(photo)window.localStorage.setItem(key,photo);else window.localStorage.removeItem(key);}catch{throw new Error('Could not save the profile picture on this device.');}}
+    const previous=user?.profilePhoto||'';
     const next={...user,profilePhoto:photo||''};setUser(next);saveSession(next);
+    try{
+      if(user?.authUserId&&supabaseBrowser){const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo||null}});if(error)throw error;}
+      else {const key=`osha-cw-avatar:${user?.email||'guest'}`;if(photo)window.localStorage.setItem(key,photo);else window.localStorage.removeItem(key);}
+    }catch(error){const restored={...user,profilePhoto:previous};setUser(restored);saveSession(restored);throw error;}
   }
   function updateAppPreferences(changes){setAppPreferences((old)=>{const next={...old,...changes};try{window.localStorage.setItem(preferenceKey(user?.authUserId||user?.email||'guest'),JSON.stringify(next));}catch{}return next;});}
   async function saveOwnProfile(form){
@@ -803,7 +806,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     const {data:messages}=await supabaseBrowser.from('carwash_user_messages').select('id,subject,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
     const role=roleNames[membership.role];
     if(!role)throw new Error('This account has no supported portal role. Contact your administrator.');
-    onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:billingRestricted?`Your ${tenant?.name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant?.name||'your business workspace'}.`:messages?.[0]?.body});
+    onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,profilePhoto:authUser.user_metadata?.oshaHubAvatar||'',role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:billingRestricted?`Your ${tenant?.name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant?.name||'your business workspace'}.`:messages?.[0]?.body});
   }
   async function submit(event){
     event.preventDefault();setError('');setMessage('');setLoading(true);

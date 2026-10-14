@@ -293,13 +293,14 @@ export default function SuperAdminApp() {
     if(!file)return;
     if(!file.type.startsWith('image/')||file.size>8*1024*1024){setError('Choose an image file smaller than 8 MB.');return;}
     setPhotoBusy(true);setError('');
+    const previousPhoto=profilePhoto;
     try {
       const photo=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(new Error('This image could not be read.'));reader.onload=()=>{const image=new Image();image.onerror=()=>reject(new Error('This image could not be opened.'));image.onload=()=>{const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;const scale=Math.max(256/image.width,256/image.height);canvas.getContext('2d').drawImage(image,(256-image.width*scale)/2,(256-image.height*scale)/2,image.width*scale,image.height*scale);resolve(canvas.toDataURL('image/jpeg',.78));};image.src=String(reader.result);};reader.readAsDataURL(file);});
+      setProfilePhoto(photo);
       const {data,error:photoError}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo}});
       if(photoError)throw photoError;
       if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);
-      setProfilePhoto(photo);
-    } catch(photoError) {setError(userFacingErrorMessage(photoError,'Could not save your profile picture.'));}
+    } catch(photoError) {setProfilePhoto(previousPhoto);setError(userFacingErrorMessage(photoError,'Could not save your profile picture.'));}
     finally {setPhotoBusy(false);}
   }
 

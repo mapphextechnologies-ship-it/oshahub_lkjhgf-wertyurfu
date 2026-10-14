@@ -1,0 +1,175 @@
+/* Shared OshaHub visual language based on the workspace settings screen. */
+:root {
+  --osha-page: #f1f8f4;
+  --osha-card: #ffffff;
+  --osha-border: #cfe5d8;
+  --osha-field: #eff9f5;
+  --osha-ink: #17233a;
+  --osha-muted: #687b91;
+  --osha-blue: #075fd0;
+  --osha-blue-hover: #064fb0;
+}
+
+body {
+  background: var(--osha-page);
+  color: var(--osha-ink);
+}
+
+.cw-shell {
+  --cw-blue: var(--osha-blue);
+  --cw-line: var(--osha-border);
+  --cw-bg: var(--osha-page);
+  --cw-blue-soft: var(--osha-field);
+  --cw-shadow: 0 5px 18px rgba(16, 45, 30, .035);
+  background: var(--osha-page);
+}
+
+.cw-main,
+.cw-page,
+.pa-main,
+.pa-content {
+  background-color: var(--osha-page);
+}
+
+.cw-sidebar {
+  background: #07150c;
+}
+
+.cw-topbar,
+.pa-topbar {
+  border-color: var(--osha-border);
+  background: rgba(255, 255, 255, .96);
+}
+
+.cw-panel,
+.cw-metric,
+.cw-service-card,
+.cw-customer-plan,
+.cw-billing-summary,
+.cw-billing-push,
+.cw-settings-panel,
+.pa-panel,
+.pa-metric,
+.pa-settings-profile-card,
+.pa-settings-card {
+  border-color: var(--osha-border);
+  border-radius: 14px;
+  background: var(--osha-card);
+  box-shadow: 0 5px 18px rgba(16, 45, 30, .035);
+}
+
+.cw-page-heading h1,
+.cw-panel-head h2,
+.cw-panel-head h3,
+.cw-panel h2,
+.cw-panel h3,
+.pa-page-title h1,
+.pa-panel > h2,
+.pa-panel-head h2 {
+  color: var(--osha-ink);
+}
+
+.cw-primary,
+.pa-primary,
+.pa-activate,
+.cw-settings-row-control .cw-choice-row button.selected,
+.pa-settings-choice button.selected,
+.pa-admin-choice button.selected {
+  border-color: var(--osha-blue);
+  background: var(--osha-blue);
+  color: #fff;
+}
+
+.cw-primary:hover,
+.pa-primary:hover,
+.pa-activate:hover {
+  background: var(--osha-blue-hover);
+}
+
+.cw-secondary,
+.pa-secondary,
+.cw-icon-button,
+.pa-bell {
+  border-color: var(--osha-border);
+  background: var(--osha-card);
+}
+
+.cw-form-label input,
+.cw-form-label select,
+.cw-form-label textarea,
+.pa-drawer input,
+.pa-drawer select,
+.pa-table-wrap select,
+.pa-settings-row-control > input,
+.pa-settings-row-control > select,
+.cw-settings-row-control > input,
+.cw-settings-row-control > select {
+  border-color: var(--osha-border);
+  border-radius: 9px;
+  background: var(--osha-field);
+  color: var(--osha-ink);
+}
+
+.cw-table thead,
+.cw-table thead th,
+.pa-table-wrap th {
+  background: #f6faf7;
+}
+
+.cw-table th,
+.pa-table-wrap th {
+  color: #687b75;
+}
+
+.cw-table td,
+.pa-table-wrap td {
+  border-color: #e4efe8;
+}
+
+.cw-table tbody tr:hover,
+.pa-table-wrap tbody tr:hover {
+  background: #f8fcf9;
+}
+
+.cw-settings-card,
+.pa-settings-card,
+.cw-settings-profile-card,
+.pa-settings-profile-card {
+  border-color: var(--osha-border);
+  border-radius: 14px;
+}
+
+.cw-settings-row-shot,
+.pa-settings-row {
+  border-color: #d5e8dd;
+}
+
+.cw-shell.theme-dark {
+  --cw-bg: #101713;
+  --cw-line: #2c3b30;
+}
+
+.pa-shell.theme-dark .pa-panel,
+.pa-shell.theme-dark .pa-metric,
+.pa-shell.theme-dark .pa-settings-profile-card,
+.pa-shell.theme-dark .pa-settings-card {
+  border-color: #2a3a2e;
+  background: #18221b;
+}
+
+.pa-shell.theme-dark .pa-table-wrap th {
+  background: #1e2b22;
+}
+
+.pa-shell.theme-dark .pa-table-wrap td {
+  border-color: #2a382e;
+}
+
+@media (max-width: 720px) {
+  .cw-panel,
+  .pa-panel,
+  .cw-metric,
+  .pa-metric {
+    border-radius: 12px;
+  }
+}

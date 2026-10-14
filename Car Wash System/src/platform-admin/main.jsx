@@ -5,6 +5,7 @@ import SuperAdminApp from './SuperAdminApp.jsx';
 import './platform-admin.css';
 import './platform-admin-enhancements.css';
 import './platform-admin-layout.css';
+import '../system-vibe.css';
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
