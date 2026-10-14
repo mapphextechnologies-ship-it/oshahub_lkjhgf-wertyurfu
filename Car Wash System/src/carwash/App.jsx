@@ -100,7 +100,7 @@ export default function CarWashApp() {
     return()=>{window.removeEventListener('beforeinstallprompt',captureInstallPrompt);window.removeEventListener('appinstalled',installed);};
   },[]);
   useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
-  useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const metadata=data?.user?.user_metadata||{};if(['light','dark'].includes(metadata.oshaHubTheme))setTheme(metadata.oshaHubTheme);if(metadata.oshaHubAvatar){setUser((current)=>current?.authUserId===user.authUserId?{...current,profilePhoto:metadata.oshaHubAvatar}:current);}}});return()=>{active=false;};},[user?.authUserId]);
+  useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const metadata=data?.user?.user_metadata||{};if(['light','dark'].includes(metadata.oshaHubTheme))setTheme(metadata.oshaHubTheme);setUser((current)=>current?.authUserId===user.authUserId?{...current,profilePhoto:metadata.oshaHubAvatar||''}:current);}});return()=>{active=false;};},[user?.authUserId]);
   useEffect(()=>{
     if(!user)return;
     try{
@@ -610,7 +610,7 @@ export default function CarWashApp() {
       <div className="cw-workspace"><div className="cw-workspace-mark"><Store size={16}/></div><div className="cw-workspace-copy"><b>{role==='SaaS Super Admin'?'Platform owner':tenant?.name||db.settings.businessName}</b><span>{ROLE_COPY[role]}</span></div><ChevronDown size={15}/></div>
       <div className="cw-nav-label">WORKSPACE</div>
       <nav className="cw-nav">{myNav.map(([key,label,Icon])=><button key={key} className={`cw-nav-item ${screen===key?'active':''}`} onClick={()=>navigate(key)}><Icon size={18}/><span>{label}</span>{key==='jobs'&&activeCount>0&&<i>{activeCount}</i>}</button>)}</nav>
-      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
+      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.profilePhoto?<img src={user.profilePhoto} alt=""/>:user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
     </aside>
     {menuOpen&&<button className="cw-mobile-scrim" onPointerDown={()=>setMenuOpen(false)} onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
     <main className="cw-main">
@@ -624,7 +624,7 @@ export default function CarWashApp() {
             {visibleNotifications.map((item)=><button key={item.id} className={`cw-notification-item ${item.read_at?'':'unread'}`} onClick={()=>{if(!item.read_at){const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('id',item.id).then(()=>setNotifications((old)=>old.map((entry)=>entry.id===item.id?{...entry,read_at:now}:entry)));}}}><b>{item.subject}</b><span>{item.body}</span><small>{new Date(item.created_at).toLocaleString('en-KE')}</small></button>)}
             {!visibleNotifications.length&&!visibleUnpaidJobs.length&&<p className="cw-notification-empty">You’re all caught up.</p>}
           </div>}
-        </div><div className="cw-top-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div>
+        </div><div className="cw-top-avatar">{user.profilePhoto?<img src={user.profilePhoto} alt=""/>:user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div>
       </header>
       <section className="cw-page">
         {liveError&&<div className="cw-auth-alert error" role="alert">{liveError}</div>}
