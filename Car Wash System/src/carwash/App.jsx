@@ -20,7 +20,7 @@ const ROLE_NAV = {
     ['overview','Overview',LayoutDashboard],['tenants','Businesses',Store],['plans','Plans & billing',Wallet],['reports','Platform reports',FileBarChart2],['audit','Audit & security',ShieldCheck]
   ],
   'Business Admin': [
-    ['overview','Overview',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['services','Services & pricing',Sparkles],['staff','Staff',Users],['payments','Payments',CreditCard],['commissions','Commissions',CircleDollarSign],['loyalty','Loyalty',BadgeCheck],['reports','Reports',FileBarChart2],['plans-billing','Plans & billing',Wallet],['settings','Settings',Settings]
+    ['overview','Overview',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['services','Services & pricing',Sparkles],['staff','Staff',Users],['payments','Payments',CreditCard],['commissions','Commissions',CircleDollarSign],['loyalty','Loyalty',BadgeCheck],['reports','Reports',FileBarChart2],['audit','Audit & activity',ShieldCheck],['plans-billing','Plans & billing',Wallet],['settings','Settings',Settings]
   ],
   Receptionist: [
     ['overview','Today’s operations',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['payments','Payments',CreditCard],['reports','Reports',FileBarChart2],['settings','Settings',Settings]
@@ -39,8 +39,15 @@ const ROLE_COPY = {
 const NAV_TITLES = Object.fromEntries(Object.values(ROLE_NAV).flatMap((items)=>items.map(([key,label])=>[key,label])));
 const K = (value) => Number(value || 0);
 const shortTime = () => new Intl.DateTimeFormat('en-KE',{hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
-const IDLE_LOGOUT_MS = 30 * 60 * 1000;
 const activityKey = (userId) => `osha-cw-last-activity:${userId}`;
+const preferenceKey = (userId) => `osha-cw-preferences:${userId}`;
+const DEFAULT_APP_PREFERENCES = { compactView: false, sessionTimeout: 30, paymentAlerts: true, overdueAlerts: true, commissionAlerts: true };
+const readSessionTimeout = (userId) => {
+  try {
+    const value = Number(JSON.parse(window.localStorage.getItem(preferenceKey(userId)) || '{}').sessionTimeout);
+    return [15,30,60].includes(value) ? value * 60_000 : 30 * 60_000;
+  } catch { return 30 * 60_000; }
+};
 const isSubscriptionReminder = (item) => item?.reference_key?.startsWith('PLAN_REMINDER:') || item?.reference_key?.startsWith('PLAN_OVERDUE:') || /subscription reminder|plan.{0,40}expires?|make a payment before it expires/i.test(`${item?.subject||''} ${item?.body||''}`);
 
 export default function CarWashApp() {
@@ -58,6 +65,7 @@ export default function CarWashApp() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [theme,setTheme]=useState(()=>window.localStorage.getItem('osha-cw-theme')==='dark'?'dark':'light');
+  const [appPreferences,setAppPreferences]=useState(DEFAULT_APP_PREFERENCES);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const notificationsRef = useRef([]);
@@ -93,6 +101,20 @@ export default function CarWashApp() {
   },[]);
   useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
   useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const preference=data?.user?.user_metadata?.oshaHubTheme;if(['light','dark'].includes(preference))setTheme(preference);}});return()=>{active=false;};},[user?.authUserId]);
+  useEffect(()=>{
+    if(!user)return;
+    try{
+      const saved=JSON.parse(window.localStorage.getItem(preferenceKey(user.authUserId||user.email))||'{}');
+      setAppPreferences({
+        compactView:typeof saved.compactView==='boolean'?saved.compactView:DEFAULT_APP_PREFERENCES.compactView,
+        sessionTimeout:[15,30,60].includes(Number(saved.sessionTimeout))?Number(saved.sessionTimeout):DEFAULT_APP_PREFERENCES.sessionTimeout,
+        paymentAlerts:typeof saved.paymentAlerts==='boolean'?saved.paymentAlerts:DEFAULT_APP_PREFERENCES.paymentAlerts,
+        overdueAlerts:typeof saved.overdueAlerts==='boolean'?saved.overdueAlerts:DEFAULT_APP_PREFERENCES.overdueAlerts,
+        commissionAlerts:typeof saved.commissionAlerts==='boolean'?saved.commissionAlerts:DEFAULT_APP_PREFERENCES.commissionAlerts
+      });
+    }
+    catch{setAppPreferences(DEFAULT_APP_PREFERENCES);}
+  },[user?.authUserId,user?.email]);
   function closeMenuFromOutside(event){if(sidebarRef.current?.contains(event.target))return;if(window.matchMedia('(max-width: 980px)').matches){if(menuOpen)setMenuOpen(false);return;}if(!sidebarCollapsed)setSidebarCollapsed(true);}
   useEffect(()=>{
     if(!supabaseBrowser){setAuthLoading(false);return undefined;}
@@ -110,7 +132,7 @@ export default function CarWashApp() {
         if(!authUser)return;
         const key=activityKey(authUser.id);
         const lastActivity=Number(window.localStorage.getItem(key)||0);
-        if(lastActivity&&Date.now()-lastActivity>=IDLE_LOGOUT_MS){
+        if(lastActivity&&Date.now()-lastActivity>=readSessionTimeout(authUser.id)){
           await supabaseBrowser.auth.signOut();
           window.localStorage.removeItem(key);clearSession();setUser(null);setShowLogin(false);window.location.hash='/';
           return;
@@ -134,7 +156,7 @@ export default function CarWashApp() {
         {const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
         const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
         if(messageError)throw messageError;
-        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch,billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
+        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,phone:membership.phone||'',role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch||'',billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
       }catch(error){if(active)setAuthRestoreError(supabaseErrorMessage(error,'Unable to reconnect your workspace. Check your connection and retry.'));}
       finally{if(active)setAuthLoading(false);}
     };
@@ -251,7 +273,7 @@ export default function CarWashApp() {
     const updateActivity=()=>window.localStorage.setItem(key,String(Date.now()));
     const expireIfIdle=()=>{
       const lastActivity=Number(window.localStorage.getItem(key)||Date.now());
-      if(Date.now()-lastActivity<IDLE_LOGOUT_MS)return;
+      if(Date.now()-lastActivity<Number(appPreferences.sessionTimeout||30)*60_000)return;
       window.localStorage.removeItem(key);
       void supabaseBrowser.auth.signOut().finally(()=>{clearSession();setUser(null);setMenuOpen(false);setModal('');setShowLogin(false);window.location.hash='/';});
     };
@@ -263,7 +285,7 @@ export default function CarWashApp() {
     window.addEventListener('scroll',updateActivity,{passive:true});
     window.addEventListener('storage',expireIfIdle);
     return()=>{window.clearInterval(timer);window.removeEventListener('pointerdown',updateActivity);window.removeEventListener('keydown',updateActivity);window.removeEventListener('touchstart',updateActivity);window.removeEventListener('scroll',updateActivity);window.removeEventListener('storage',expireIfIdle);};
-  },[user?.authUserId]);
+  },[user?.authUserId,appPreferences.sessionTimeout]);
   useEffect(()=>{ if(!toast)return; const id=setTimeout(()=>setToast(''),2700); return()=>clearTimeout(id); },[toast]);
   useEffect(()=>{
     if(!user)return;
@@ -288,7 +310,13 @@ export default function CarWashApp() {
 
   const role = user?.role || '';
   const isStaffRole = ['washer','receptionist'].includes(String(role).toLowerCase());
-  const visibleNotifications = isStaffRole ? notifications.filter((item)=>!isSubscriptionReminder(item)) : notifications;
+  const visibleNotifications = notifications.filter((item)=>{
+    const text=`${item.subject||''} ${item.body||''}`.toLowerCase();
+    if(isSubscriptionReminder(item))return !isStaffRole&&appPreferences.overdueAlerts;
+    if(/commission|payout|earning/.test(text))return appPreferences.commissionAlerts;
+    if(/payment|receipt|m-pesa|mpesa|billing/.test(text))return appPreferences.paymentAlerts;
+    return true;
+  });
   const tenantId = user?.tenant_id || db.activeTenantId;
   const tenant = db.tenants.find((item)=>item.id===tenantId) || db.tenants[0];
   const scoped = (rows) => rows.filter((item)=>role==='SaaS Super Admin'||item.tenant_id===tenantId);
@@ -340,6 +368,19 @@ export default function CarWashApp() {
     notify(`${role} app link copied.`);
   }
   async function changeTheme(nextTheme){setTheme(nextTheme);if(!user?.authUserId||!supabaseBrowser)return;try{const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubTheme:nextTheme}});if(error)notify('Theme updated on this device, but could not sync to your OshaHub account.');}catch{notify('Theme updated on this device, but could not sync to your OshaHub account.');}}
+  function updateAppPreferences(changes){setAppPreferences((old)=>{const next={...old,...changes};try{window.localStorage.setItem(preferenceKey(user?.authUserId||user?.email||'guest'),JSON.stringify(next));}catch{}return next;});}
+  async function saveOwnProfile(form){
+    const fullName=form.name.trim(),phone=form.phone.trim(),branch=form.branch.trim();
+    if(fullName.length<2||fullName.length>120||branch.length<2||branch.length>120||(phone&&(phone.length<7||phone.length>30)))throw new Error('Enter a valid name, phone number and branch.');
+    let profile={full_name:fullName,phone,branch};
+    if(user.authUserId){
+      const {data:updated,error}=await supabaseBrowser.rpc('carwash_update_own_profile',{target_membership:user.staffId,p_full_name:fullName,p_phone:phone||null,p_branch:branch});
+      if(error)throw error;
+      profile={full_name:updated.full_name,phone:updated.phone||'',branch:updated.branch||''};
+    }
+    const next={...user,name:profile.full_name,phone:profile.phone,branch:profile.branch};
+    setUser(next);saveSession(next);notify('Your profile was saved.');return next;
+  }
   function navigate(key) { setScreen(key); setMenuOpen(false); setQuery(''); setFilter('All'); }
   function login(selected) {
     if(!selected)return;
@@ -539,7 +580,7 @@ export default function CarWashApp() {
   }
 
   const dailyRevenue=useMemo(()=>scoped(db.payments).filter((payment)=>payment.status==='PAID').reduce((sum,payment)=>sum+K(payment.amount),0),[db.payments,tenantId,role]);
-  const visibleUnpaidJobs=role==='Washer'?[]:scopedJobs.filter((job)=>job.paymentStatus!=='PAID');
+  const visibleUnpaidJobs=role==='Washer'||!appPreferences.paymentAlerts?[]:scopedJobs.filter((job)=>job.paymentStatus!=='PAID');
   const notificationCount=visibleNotifications.filter((item)=>!item.read_at).length+visibleUnpaidJobs.length;
   const activeCount=workerJobs.filter((job)=>['ASSIGNED','IN PROGRESS'].includes(job.status)).length;
   const readyCount=workerJobs.filter((job)=>job.status==='READY').length;
@@ -557,14 +598,14 @@ export default function CarWashApp() {
   if(user.authUserId&&liveLoading)return <WorkspaceBootScreen message="Loading your wash floor…"/>;
   if(user.authUserId&&!user.tenant_id)return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">WORKSPACE ACCESS</span><h1>No business workspace assigned</h1><p>Ask the platform administrator to check your active membership.</p><button className="cw-primary" onClick={logout}>Sign out</button></div></div>;
 
-  return <div className={`cw-shell ${theme==='dark'?'theme-dark':''} ${role==='Washer'?'role-washer':''}`} onPointerDownCapture={closeMenuFromOutside}>
+  return <div className={`cw-shell ${theme==='dark'?'theme-dark':''} ${appPreferences.compactView?'compact-view':''} ${role==='Washer'?'role-washer':''}`} onPointerDownCapture={closeMenuFromOutside}>
     <SearchableTables />
     <aside ref={sidebarRef} className={`cw-sidebar ${menuOpen?'is-open':''} ${sidebarCollapsed?'is-collapsed':''}`}>
       <div className="cw-brand"><img src="/osha-hub-logo.svg" alt="OshaHub"/><button className="cw-icon-button cw-sidebar-brand-toggle" onClick={()=>{if(window.matchMedia('(max-width: 980px)').matches)setMenuOpen(false);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={menuOpen?'Close side menu':sidebarCollapsed?'Expand side menu':'Collapse side menu'}>{menuOpen?<X size={19}/>:<Menu size={19}/>}</button></div>
       <div className="cw-workspace"><div className="cw-workspace-mark"><Store size={16}/></div><div className="cw-workspace-copy"><b>{role==='SaaS Super Admin'?'Platform owner':tenant?.name||db.settings.businessName}</b><span>{ROLE_COPY[role]}</span></div><ChevronDown size={15}/></div>
       <div className="cw-nav-label">WORKSPACE</div>
       <nav className="cw-nav">{myNav.map(([key,label,Icon])=><button key={key} className={`cw-nav-item ${screen===key?'active':''}`} onClick={()=>navigate(key)}><Icon size={18}/><span>{label}</span>{key==='jobs'&&activeCount>0&&<i>{activeCount}</i>}</button>)}</nav>
-      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}{isStaffRole&&<><button type="button" className="cw-install-app" aria-label={`Copy ${role} app link`} onClick={copyPortalAppLink}><Copy size={15}/><span>Copy app link</span></button><button type="button" className="cw-install-app" aria-label="Install app" onClick={installApp}><Download size={15}/><span>Install app</span></button></>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
+      <div className="cw-sidebar-bottom">{!isStaffRole&&<div className="cw-plan-card"><div className="cw-plan-icon"><Sparkles size={15}/></div><div><b>{role==='SaaS Super Admin'?'Platform health':`${tenant?.plan||'Growth'} plan`}</b><small>{role==='SaaS Super Admin'?'All services operational':`${db.billing?.currentSubscription?.status||tenant?.status||'ACTIVE'} subscription`}</small></div><ArrowRight size={15}/></div>}<button className="cw-user-menu" onClick={()=>navigate('profile')}><div className="cw-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><span><b>{user.name}</b><small>{user.role}</small></span><MoreHorizontal size={17}/></button><button className="cw-signout" onClick={logout}><LogOut size={16}/>Sign out</button></div>
     </aside>
     {menuOpen&&<button className="cw-mobile-scrim" onPointerDown={()=>setMenuOpen(false)} onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
     <main className="cw-main">
@@ -583,7 +624,7 @@ export default function CarWashApp() {
       <section className="cw-page">
         {liveError&&<div className="cw-auth-alert error" role="alert">{liveError}</div>}
         {user.billingRestricted&&!isStaffRole&&<div className="cw-auth-alert error" role="alert"><b>Your workspace is restricted.</b><br/>{user.activationMessage||`Make a payment to continue using ${user.tenant_name||'your business workspace'}.`}</div>}
-        {!isStaffRole&&!user.billingRestricted&&notifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)&&<div className="cw-auth-alert billing-reminder" role="status"><b>Subscription reminder</b><br/>{notifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)?.body}</div>}
+        {!isStaffRole&&!user.billingRestricted&&visibleNotifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)&&<div className="cw-auth-alert billing-reminder" role="status"><b>Subscription reminder</b><br/>{visibleNotifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)?.body}</div>}
         {screen==='overview'&&<Overview db={db} role={role} user={user} jobs={workerJobs} payments={scoped(db.payments)} revenue={dailyRevenue} active={activeCount} ready={readyCount} onNavigate={navigate} onCreate={()=>setModal('order')}/>}
         {screen==='jobs'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment} canDelete={['Business Admin','Receptionist'].includes(role)} selectedIds={selectedJobIds} deleting={deletingJobs} onToggle={(id)=>setSelectedJobIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedJobIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClearSelection={()=>setSelectedJobIds([])} onDelete={deleteWashOrders}/>}
         {screen==='history'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} history onTransition={updateJob} onPayment={recordPayment}/>}
@@ -599,7 +640,7 @@ export default function CarWashApp() {
         {screen==='tenants'&&<TenantsPage tenants={db.tenants} onAdd={()=>setModal('tenant')} onChange={(item,status)=>patchDb((next)=>{const row=next.tenants.find((x)=>x.id===item.id);if(row)row.status=status;return next;})}/>}
         {screen==='plans'&&<PlansPage plans={db.plans||[]} tenants={db.tenants} onAdd={()=>setModal('plan')}/>}
         {screen==='audit'&&<AuditPage rows={scoped(db.audit)}/>}
-        {screen==='settings'&&<SettingsPage db={db} user={user} role={role} theme={theme} onThemeChange={changeTheme} onCopyPortalLink={copyPortalAppLink} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Settings are temporarily unavailable. Contact support if the problem continues.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(userFacingErrorMessage(error,'Could not update business settings. Check the details and try again.'));return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
+        {screen==='settings'&&<SettingsPage db={db} user={user} role={role} theme={theme} appPreferences={appPreferences} onPreferenceChange={updateAppPreferences} onThemeChange={changeTheme} onCopyPortalLink={copyPortalAppLink} onInstallApp={installApp} onSaveProfile={saveOwnProfile} onNavigate={navigate} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Settings are temporarily unavailable. Contact support if the problem continues.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(userFacingErrorMessage(error,'Could not update business settings. Check the details and try again.'));return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
         {screen==='profile'&&<ProfilePage user={user} tenant={tenant} onLogout={logout}/>}
       </section>
     </main>
@@ -944,17 +985,32 @@ function CustomerBillingPage({billing,tenant,onRequest,onRefresh}){
 
 function AuditPage({rows}){return <><PageHeading title="Audit & security" subtitle="Recent operational events and sensitive account activity."/><div className="cw-security-banner"><ShieldCheck size={23}/><span><b>Tenant isolation is enforced</b><small>Business records are scoped to the signed in workspace.</small></span><StatusPill status="ACTIVE"/></div><div className="cw-panel cw-table-panel"><div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>EVENT</th><th>DETAIL</th><th>TIME</th><th>RESULT</th></tr></thead><tbody>{rows.map((row)=><tr key={row.id}><td><b>{row.action}</b></td><td>{row.detail}</td><td>{row.time}</td><td><span className="cw-pay-state paid"><CheckCircle2 size={13}/> Recorded</span></td></tr>)}</tbody></table></div></div></>}
 
-function SettingsPage({db,user,role,onSave,theme,onThemeChange,onCopyPortalLink}){
-  const [name,setName]=useState(db.settings.businessName);
+function SettingsPage({db,user,role,onSave,theme,onThemeChange,onCopyPortalLink,onInstallApp,appPreferences,onPreferenceChange,onSaveProfile,onNavigate}){
+  const [name,setName]=useState(user?.name||'');
+  const [phone,setPhone]=useState(user?.phone||'');
+  const [profileBranch,setProfileBranch]=useState(user?.branch||db.settings.branch||'Main branch');
+  const [businessName,setBusinessName]=useState(db.settings.businessName);
   const [branch,setBranch]=useState(db.settings.branch);
   const [rate,setRate]=useState(String(db.settings.loyaltyRate));
   const [accountEmail,setAccountEmail]=useState(user?.email||'');
   const [newPassword,setNewPassword]=useState('');
   const [confirmPassword,setConfirmPassword]=useState('');
   const [accountBusy,setAccountBusy]=useState(false);
+  const [profileBusy,setProfileBusy]=useState(false);
   const [accountMessage,setAccountMessage]=useState('');
   const [accountError,setAccountError]=useState('');
+  const [profileMessage,setProfileMessage]=useState('');
+  const [profileError,setProfileError]=useState('');
   const isBusinessAdmin=role==='Business Admin';
+  const isReceptionist=role==='Receptionist';
+  const isWasher=role==='Washer';
+  const accessSummary=isBusinessAdmin?'Manage this business workspace and its team.':isReceptionist?'Manage the wash queue, customer records and front-desk payments.':'View and update assigned wash jobs. Business finance screens are restricted to the business admin and front desk.';
+  async function saveProfile(event){
+    event.preventDefault();setProfileMessage('');setProfileError('');setProfileBusy(true);
+    try{await onSaveProfile({name,phone,branch:profileBranch});setProfileMessage('Profile saved.');}
+    catch(error){setProfileError(userFacingErrorMessage(error,'Could not save your profile. Check the details and try again.'));}
+    finally{setProfileBusy(false);}
+  }
   async function updateAccount(event){
     event.preventDefault();setAccountMessage('');setAccountError('');
     const emailChanged=accountEmail.trim().toLowerCase()!==(user?.email||'').toLowerCase();
@@ -970,22 +1026,62 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange,onCopyPortalLink}
     setAccountMessage(emailChanged?'Check your new email address for a confirmation link. The change takes effect after you confirm it.':'Your password has been changed.');
   }
   return <>
-    <PageHeading title={isBusinessAdmin?'Business settings':'Workspace settings'} subtitle={isBusinessAdmin?'Manage your business details, loyalty rules and workspace preferences.':'Manage your account preferences and washer workspace appearance.'}/>
-    <div className="cw-settings-grid">
-      {isBusinessAdmin&&<div className="cw-panel cw-settings-panel">
-        <div className="cw-panel-head"><div><h2>Business profile</h2><p>Workspace identity and branch settings</p></div></div>
-        <label className="cw-form-label">BUSINESS NAME<input value={name} onChange={(event)=>setName(event.target.value)}/></label>
+    <PageHeading title="Workspace settings" subtitle={`Personal and workspace preferences for ${role}.`}/>
+    <div className="cw-settings-grid cw-settings-workspace">
+      <section className="cw-panel cw-settings-panel cw-preference-panel">
+        <div className="cw-panel-head"><div><h2>Profile</h2><p>Keep your contact and branch details current.</p></div></div>
+        <form onSubmit={saveProfile} className="cw-settings-form">
+          <label className="cw-form-label">NAME<input autoComplete="name" required minLength="2" maxLength="120" value={name} onChange={(event)=>setName(event.target.value)}/></label>
+          <label className="cw-form-label">ROLE<input value={role} readOnly/></label>
+          <label className="cw-form-label">PHONE<input type="tel" autoComplete="tel" value={phone} onChange={(event)=>setPhone(event.target.value)} placeholder="Add your phone number"/></label>
+          <label className="cw-form-label">BRANCH<input required minLength="2" maxLength="120" value={profileBranch} onChange={(event)=>setProfileBranch(event.target.value)}/></label>
+          {profileError&&<p className="cw-account-feedback error" role="alert">{profileError}</p>}
+          {profileMessage&&<p className="cw-account-feedback success" role="status">{profileMessage}</p>}
+          <button className="cw-primary" disabled={profileBusy}>{profileBusy?'Saving…':'Save profile'} <Check size={16}/></button>
+        </form>
+      </section>
+      {isBusinessAdmin&&<div className="cw-panel cw-settings-panel cw-preference-panel">
+        <div className="cw-panel-head"><div><h2>Business profile</h2><p>Workspace identity and branch settings.</p></div></div>
+        <label className="cw-form-label">BUSINESS NAME<input value={businessName} onChange={(event)=>setBusinessName(event.target.value)}/></label>
         <label className="cw-form-label">PRIMARY BRANCH<input value={branch} onChange={(event)=>setBranch(event.target.value)}/></label>
         <label className="cw-form-label">LOYALTY EARN RATE<input type="number" min="0" value={rate} onChange={(event)=>setRate(event.target.value)}/><small>Points awarded for each KES spent on a closed order.</small></label>
-        <button className="cw-primary" onClick={()=>onSave({businessName:name,branch,loyaltyRate:Math.max(0,K(rate))})}>Save business settings <Check size={16}/></button>
+        <button className="cw-primary" onClick={()=>onSave({businessName,branch,loyaltyRate:Math.max(0,K(rate))})}>Save business settings <Check size={16}/></button>
       </div>}
-      {['Washer','Receptionist'].includes(role)&&<section className="cw-panel cw-settings-panel cw-account-security"><div className="cw-panel-head"><div><h2>{role} app link</h2><p>Copy the direct link to this role’s web app.</p></div></div><button type="button" className="cw-primary" onClick={onCopyPortalLink}><Copy size={16}/> Copy {role.toLowerCase()} app link</button></section>}
-      <section className="cw-panel cw-settings-panel cw-account-security"><div className="cw-panel-head"><div><h2>Sign-in and security</h2><p>Update the email or password for your own OshaHub account.</p></div></div><form onSubmit={updateAccount}><label className="cw-form-label">ACCOUNT EMAIL<input type="email" autoComplete="email" required value={accountEmail} onChange={(event)=>setAccountEmail(event.target.value)}/><small>We’ll send a confirmation link before changing your sign-in email.</small></label><label className="cw-form-label">NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={newPassword} onChange={(event)=>setNewPassword(event.target.value)} placeholder="Leave blank to keep your current password"/></label><label className="cw-form-label">CONFIRM NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={confirmPassword} onChange={(event)=>setConfirmPassword(event.target.value)} placeholder="Enter the new password again"/></label>{accountError&&<p className="cw-account-feedback error" role="alert">{accountError}</p>}{accountMessage&&<p className="cw-account-feedback success" role="status">{accountMessage}</p>}<button className="cw-primary" disabled={accountBusy}>{accountBusy?'Updating account…':'Update sign-in details'} <Check size={16}/></button></form></section>
-      <div className="cw-panel cw-info-panel"><ShieldCheck size={22}/><h3>Account and workspace</h3><p>Your access is limited to the work assigned to your OshaHub role.</p><div><span>Business</span><b>{db.settings.businessName}</b></div><div><span>Signed in as</span><b>{user?.email||user?.name||'OshaHub team member'}</b></div><div><span>Workspace role</span><b>{role}</b></div>{isBusinessAdmin&&<div><span>Subscription</span><b>{db.billing?.currentSubscription?.status||db.tenants[0]?.status||'ACTIVE'}</b></div>}</div>
-      <section className="cw-panel cw-appearance-panel"><div className="cw-panel-head"><div><h2>Appearance</h2><p>Choose the workspace colors that suit your screen.</p></div></div><div className="cw-theme-options"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><span className="cw-theme-preview light"><Sun size={20}/><i/><i/><i/></span><span><b>Light</b><small>Bright background</small></span>{theme==='light'&&<CheckCircle2 size={17}/>}</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><span className="cw-theme-preview dark"><Moon size={20}/><i/><i/><i/></span><span><b>Dark</b><small>Low-light workspace</small></span>{theme==='dark'&&<CheckCircle2 size={17}/>}</button></div><p className="cw-appearance-note">Appearance syncs to your OshaHub account and is applied in this browser.</p></section>
+      <section className="cw-panel cw-settings-panel cw-preference-panel">
+        <div className="cw-panel-head"><div><h2>App layout & appearance</h2><p>Choose a theme and comfortable or compact spacing for this device.</p></div></div>
+        <div className="cw-settings-field"><span>Theme</span><div className="cw-choice-row"><button type="button" className={theme==='light'?'selected':''} aria-pressed={theme==='light'} onClick={()=>onThemeChange('light')}><Sun size={15}/> Light</button><button type="button" className={theme==='dark'?'selected':''} aria-pressed={theme==='dark'} onClick={()=>onThemeChange('dark')}><Moon size={15}/> Dark</button></div></div>
+        <div className="cw-settings-field"><span>App view</span><div className="cw-choice-row"><button type="button" className={!appPreferences.compactView?'selected':''} aria-pressed={!appPreferences.compactView} onClick={()=>onPreferenceChange({compactView:false})}>Comfortable</button><button type="button" className={appPreferences.compactView?'selected':''} aria-pressed={appPreferences.compactView} onClick={()=>onPreferenceChange({compactView:true})}>Compact</button></div></div>
+        <div className="cw-settings-install"><span><b>Get OshaHub on this device</b><small>Add the workspace to your home screen for quick access.</small></span><button type="button" className="cw-secondary" onClick={onInstallApp}><Download size={15}/> Install app</button></div>
+        {(isWasher||isReceptionist)&&<button type="button" className="cw-text-action cw-settings-link" onClick={onCopyPortalLink}><Copy size={14}/> Copy {role.toLowerCase()} app link</button>}
+      </section>
+      <section className="cw-panel cw-settings-panel cw-preference-panel">
+        <div className="cw-panel-head"><div><h2>Notifications</h2><p>Choose which alerts appear in your notification center on this device.</p></div></div>
+        {(isBusinessAdmin||isReceptionist)&&<PreferenceToggle label="Payment alerts" detail="Unpaid orders, receipts and payment updates." checked={appPreferences.paymentAlerts} onChange={(value)=>onPreferenceChange({paymentAlerts:value})}/>}
+        {isBusinessAdmin&&<PreferenceToggle label="Overdue alerts" detail="Subscription and workspace access reminders." checked={appPreferences.overdueAlerts} onChange={(value)=>onPreferenceChange({overdueAlerts:value})}/>}
+        {isWasher&&<PreferenceToggle label="Commission alerts" detail="Commission and payout messages when available." checked={appPreferences.commissionAlerts} onChange={(value)=>onPreferenceChange({commissionAlerts:value})}/>}
+      </section>
+      <section className="cw-panel cw-settings-panel cw-preference-panel">
+        <div className="cw-panel-head"><div><h2>Security & access</h2><p>Sign-in controls and workspace permissions.</p></div></div>
+        <div className="cw-settings-row"><span><b>App access</b><small>{accessSummary}</small></span><span className="cw-setting-value">{isWasher?'Finance team only':isReceptionist?'Front desk':'Business admin'}</span></div>
+        <label className="cw-settings-row"><span><b>Session timeout</b><small>Sign out after no activity.</small></span><select value={appPreferences.sessionTimeout} onChange={(event)=>onPreferenceChange({sessionTimeout:Number(event.target.value)})}><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
+        <div className="cw-settings-row"><span><b>Sign-in verification</b><small>Verification requirements are managed by the workspace authentication settings.</small></span><span className="cw-setting-value">Managed</span></div>
+        <div className="cw-settings-row"><span><b>Device lock</b><small>Use your phone or computer’s screen lock to protect this app.</small></span><span className="cw-setting-value">Device setting</span></div>
+      </section>
+      <section className="cw-panel cw-settings-panel cw-account-security cw-preference-panel">
+        <div className="cw-panel-head"><div><h2>Password and account</h2><p>Change the password or sign-in email for your own account.</p></div></div>
+        {user?.authUserId?<form onSubmit={updateAccount}><label className="cw-form-label">ACCOUNT EMAIL<input type="email" autoComplete="email" required value={accountEmail} onChange={(event)=>setAccountEmail(event.target.value)}/><small>A confirmation link is required before changing your email.</small></label><label className="cw-form-label">NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={newPassword} onChange={(event)=>setNewPassword(event.target.value)} placeholder="Leave blank to keep your current password"/></label><label className="cw-form-label">CONFIRM NEW PASSWORD<input type="password" autoComplete="new-password" minLength="8" value={confirmPassword} onChange={(event)=>setConfirmPassword(event.target.value)} placeholder="Enter the new password again"/></label>{accountError&&<p className="cw-account-feedback error" role="alert">{accountError}</p>}{accountMessage&&<p className="cw-account-feedback success" role="status">{accountMessage}</p>}<button className="cw-primary" disabled={accountBusy}>{accountBusy?'Updating account…':'Change password / email'} <Check size={16}/></button></form>:<p className="cw-settings-help">Password changes are available for signed-in workspace accounts.</p>}
+      </section>
+      <section className="cw-panel cw-settings-panel cw-preference-panel cw-settings-access">
+        <div className="cw-panel-head"><div><h2>Workspace & help</h2><p>Current account scope and role-specific help.</p></div></div>
+        <div className="cw-settings-row"><span><b>Business</b><small>Current workspace</small></span><span className="cw-setting-value">{db.settings.businessName}</span></div>
+        <div className="cw-settings-row"><span><b>Branch</b><small>Assigned work location</small></span><span className="cw-setting-value">{profileBranch}</span></div>
+        <div className="cw-settings-row"><span><b>Help</b><small>{isBusinessAdmin?'Review account activity and security events.':'Contact your Business Admin for account, branch or access changes.'}</small></span><div className="cw-settings-help-actions"><a className="cw-secondary" href="/#faq" target="_blank" rel="noreferrer">Help center</a>{isBusinessAdmin&&<button type="button" className="cw-secondary" onClick={()=>onNavigate('audit')}><History size={15}/> View activity</button>}</div></div>
+      </section>
     </div>
   </>;
 }
+
+function PreferenceToggle({label,detail,checked,onChange}){return <label className="cw-preference-toggle"><span><b>{label}</b><small>{detail}</small></span><span className="cw-toggle-control"><small>{checked?'On':'Off'}</small><input type="checkbox" checked={checked} onChange={(event)=>onChange(event.target.checked)}/></span></label>}
 
 function ProfilePage({user,tenant,onLogout}){return <><PageHeading title="My profile" subtitle="Your account and workspace access."/><div className="cw-profile-card"><div className="cw-profile-avatar">{user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div><h2>{user.name}</h2><span>{user.role}</span><div className="cw-profile-detail"><small>EMAIL</small><b>{user.email}</b></div><div className="cw-profile-detail"><small>WORKSPACE</small><b>{tenant?.name||'Platform owner'}</b></div><button className="cw-secondary" onClick={onLogout}><LogOut size={16}/> Sign out</button></div></>}
 
