@@ -98,6 +98,19 @@ export async function loadLiveStaff(user) {
   })).sort((a, b) => Number(b.status === 'Pending approval') - Number(a.status === 'Pending approval'));
 }
 
+// Poll only the tenant and subscription rows for status changes made by platform admins.
+export async function loadLiveBillingStatus(user) {
+  const tenantId = user?.tenant_id;
+  if (!tenantId) throw new Error('This account has no business workspace assigned.');
+  const [tenantRes, subscriptionsRes] = await Promise.all([
+    supabaseBrowser.from('carwash_tenants').select('id,status').eq('id', tenantId).single(),
+    supabaseBrowser.from('carwash_subscriptions').select('*').eq('tenant_id', tenantId).order('starts_at', { ascending: false }),
+  ]);
+  if (tenantRes.error) throw tenantRes.error;
+  if (subscriptionsRes.error) throw subscriptionsRes.error;
+  return { tenant: tenantRes.data, subscriptions: subscriptionsRes.data || [] };
+}
+
 export function dbMethod(method = 'CASH') {
   return ({ CASH: 'CASH', CARD: 'CARD', 'M-PESA': 'M-PESA', 'M-Pesa': 'M-PESA', WALLET: 'WALLET', LOYALTY: 'LOYALTY' })[method] || 'CASH';
 }

@@ -7,7 +7,7 @@ import {
   Settings, ShieldCheck, Share2, Sparkles, Store, Sun, Moon, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff, Trash2, Pencil
 } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
-import { dbMethod, loadLiveStaff, loadLiveWorkspace } from './liveWorkspace.js';
+import { dbMethod, loadLiveBillingStatus, loadLiveStaff, loadLiveWorkspace } from './liveWorkspace.js';
 import { getTrialRequestState } from './trialRequestState.js';
 import {
   clearLegacyBrowserData, clearSession, demoUsers, formatKes, getSession, markUserSeen,
@@ -146,6 +146,50 @@ export default function CarWashApp() {
     loadLiveWorkspace(user).then(({db:liveDb})=>{if(active)setDb(liveDb);}).catch((error)=>{if(active)setLiveError(userFacingErrorMessage(error,'Unable to load this business workspace. Refresh and try again.'));}).finally(()=>{if(active)setLiveLoading(false);});
     return()=>{active=false;};
   },[user?.authUserId,user?.tenant_id]);
+  useEffect(()=>{
+    if(!user?.authUserId||!user.tenant_id||user.role!=='Business Admin'||db.activeTenantId!==user.tenant_id)return undefined;
+    let active=true;let pending=false;
+    const previousSubscription=db.billing?.currentSubscription||null;
+    const refreshBillingStatus=async()=>{
+      if(pending||document.visibilityState==='hidden')return;
+      pending=true;
+      try{
+        const {tenant:liveTenant,subscriptions}=await loadLiveBillingStatus(user);
+        if(!active)return;
+        const currentSubscription=subscriptions[0]||null;
+        const changed=previousSubscription?.id!==currentSubscription?.id
+          ||previousSubscription?.status!==currentSubscription?.status
+          ||previousSubscription?.starts_at!==currentSubscription?.starts_at
+          ||previousSubscription?.ends_at!==currentSubscription?.ends_at;
+        const tenantStatusChanged=db.tenants?.find((item)=>item.id===user.tenant_id)?.status!==liveTenant.status;
+        if(changed||tenantStatusChanged)setDb((current)=>{
+          if(current.activeTenantId!==user.tenant_id)return current;
+          const plan=current.billing?.plans?.find((item)=>item.id===currentSubscription?.plan_id)||null;
+          return {
+            ...current,
+            tenants:(current.tenants||[]).map((item)=>item.id===user.tenant_id?{...item,status:liveTenant.status,plan:plan?.name||item.plan,branches:currentSubscription?.branch_count||item.branches}:item),
+            billing:{...current.billing,subscriptions,currentSubscription,currentPlan:plan||current.billing?.currentPlan||null},
+          };
+        });
+        if(changed&&currentSubscription?.status==='TRIAL'&&currentSubscription.id!==previousSubscription?.id){
+          setToast(`A new 7-day trial is active for ${user.tenant_name||'your business'}.`);
+        }
+        if(changed){
+          const {data:canOperate,error}=await supabaseBrowser.rpc('carwash_can_operate',{target_tenant:user.tenant_id});
+          if(active&&!error&&Boolean(canOperate)!==Boolean(user.billingRestricted)){
+            const next={...user,billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${user.tenant_name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${user.tenant_name||'your business workspace'}.`:''};
+            setUser(next);saveSession(next);
+          }
+        }
+      }catch{/* Keep the last known subscription state during temporary connection errors. */}
+      finally{pending=false;}
+    };
+    void refreshBillingStatus();
+    const timer=window.setInterval(refreshBillingStatus,10000);
+    const onVisible=()=>{if(document.visibilityState==='visible')void refreshBillingStatus();};
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>{active=false;window.clearInterval(timer);document.removeEventListener('visibilitychange',onVisible);};
+  },[user?.authUserId,user?.tenant_id,user?.role,user?.billingRestricted,db.activeTenantId,db.billing?.currentSubscription?.id,db.billing?.currentSubscription?.status,db.billing?.currentSubscription?.starts_at,db.billing?.currentSubscription?.ends_at]);
   useEffect(()=>{
     if(!user?.authUserId||!user.tenant_id||user.role!=='Business Admin'||screen!=='staff')return undefined;
     let active=true;let pending=false;
