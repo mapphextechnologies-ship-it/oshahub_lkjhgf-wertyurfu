@@ -66,7 +66,7 @@ export default function SuperAdminApp() {
     if (!supabaseBrowser) return;
     if (!quiet) setBusy(true);
     setError('');
-    const [tenants, requests, plans, subscriptions, subscriptionPayments, billingRequests, deletedRecords] = await Promise.all([
+    const [tenants, requests, initialPlans, subscriptions, subscriptionPayments, billingRequests, deletedRecords] = await Promise.all([
       supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status,created_at').order('created_at', { ascending: false }),
       supabaseBrowser.from('carwash_access_requests').select('id,tenant_name,owner_name,phone,status,created_at').order('created_at', { ascending: false }),
       supabaseBrowser.from('carwash_plans').select('id,name,price_kes,duration_days,feature_flags,active').is('deleted_at', null).order('price_kes'),
@@ -75,9 +75,21 @@ export default function SuperAdminApp() {
       supabaseBrowser.from('carwash_billing_requests').select('*').order('created_at', { ascending: false }),
       supabaseBrowser.rpc('carwash_list_deleted_admin_records')
     ]);
+    // Keep the dashboard readable if production is still on the pre-soft-delete schema.
+    // The deleted_at column is introduced by migration 20261019000100.
+    let plans = initialPlans;
+    if (plans.error && /deleted_at/i.test(plans.error.message || '')
+      && (plans.error.code === '42703' || plans.error.code === 'PGRST204' || /schema cache|column .* does not exist/i.test(plans.error.message || ''))) {
+      plans = await supabaseBrowser.from('carwash_plans')
+        .select('id,name,price_kes,duration_days,feature_flags,active').order('price_kes');
+    }
     const failed = [tenants, requests, plans, subscriptions].find((result) => result.error);
-    if (failed) setError(userFacingErrorMessage(failed.error,'Could not load the business data. Refresh and try again.'));
-    else {
+    if (failed) {
+      console.error('Super Admin business data load failed', { code: failed.error.code, message: failed.error.message });
+      setError('Could not load the business data. Refresh and try again.');
+      await supabaseBrowser.auth.signOut();
+      setSession(null);
+    } else {
       const billingSchemaReady=!subscriptionPayments.error;
       const subscriptionRows = subscriptions.data || [];
       const tenantRows = (tenants.data || []).map((tenant) => {
