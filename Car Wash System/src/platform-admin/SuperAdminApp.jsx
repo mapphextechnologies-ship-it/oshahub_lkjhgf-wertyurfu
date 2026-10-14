@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Trash2, X } from 'lucide-react';
+import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Camera, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, Moon, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sun, Trash2, X } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
 import SearchableTables from '../components/SearchableTables.jsx';
 
@@ -31,8 +31,20 @@ export default function SuperAdminApp() {
   const [planSelections, setPlanSelections] = useState({});
   const [adminName, setAdminName] = useState('');
   const [grantingTrial, setGrantingTrial] = useState('');
+  const [theme,setTheme]=useState(()=>window.localStorage.getItem('osha-cw-theme')==='dark'?'dark':'light');
+  const [compactView,setCompactView]=useState(false);
+  const [profilePhoto,setProfilePhoto]=useState('');
+  const [photoBusy,setPhotoBusy]=useState(false);
 
   useEffect(() => { setAdminName(session?.membership.full_name || ''); }, [session?.membership.full_name]);
+  useEffect(()=>{
+    if(!session?.user)return;
+    setProfilePhoto(session.user.user_metadata?.oshaHubAvatar||'');
+    try{setCompactView(Boolean(JSON.parse(window.localStorage.getItem(`osha-cw-preferences:${session.user.id}`)||'{}').compactView));}catch{setCompactView(false);}
+    const savedTheme=session.user.user_metadata?.oshaHubTheme;
+    if(['light','dark'].includes(savedTheme))setTheme(savedTheme);
+  },[session?.user?.id]);
+  useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
 
   useEffect(() => {
     if (!supabaseBrowser) { setAuthLoading(false); return undefined; }
@@ -213,6 +225,45 @@ export default function SuperAdminApp() {
     finally { setBusy(false); }
   }
 
+  async function saveAdminTheme(nextTheme) {
+    setTheme(nextTheme);
+    if(!session?.user?.id)return;
+    const {data,error:themeError}=await supabaseBrowser.auth.updateUser({data:{oshaHubTheme:nextTheme}});
+    if(themeError)setError(userFacingErrorMessage(themeError,'Theme saved on this device, but could not sync to your account.'));
+    else if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);
+  }
+
+  function saveCompactView(nextValue) {
+    setCompactView(nextValue);
+    try {
+      const key=`osha-cw-preferences:${session.user.id}`;
+      const current=JSON.parse(window.localStorage.getItem(key)||'{}');
+      window.localStorage.setItem(key,JSON.stringify({...current,compactView:nextValue}));
+    } catch { setError('Could not save the app layout on this device.'); }
+  }
+
+  async function saveAdminPhoto(file) {
+    if(!file)return;
+    if(!file.type.startsWith('image/')||file.size>8*1024*1024){setError('Choose an image file smaller than 8 MB.');return;}
+    setPhotoBusy(true);setError('');
+    try {
+      const photo=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(new Error('This image could not be read.'));reader.onload=()=>{const image=new Image();image.onerror=()=>reject(new Error('This image could not be opened.'));image.onload=()=>{const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;const scale=Math.max(256/image.width,256/image.height);canvas.getContext('2d').drawImage(image,(256-image.width*scale)/2,(256-image.height*scale)/2,image.width*scale,image.height*scale);resolve(canvas.toDataURL('image/jpeg',.78));};image.src=String(reader.result);};reader.readAsDataURL(file);});
+      const {data,error:photoError}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo}});
+      if(photoError)throw photoError;
+      if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);
+      setProfilePhoto(photo);
+    } catch(photoError) {setError(userFacingErrorMessage(photoError,'Could not save your profile picture.'));}
+    finally {setPhotoBusy(false);}
+  }
+
+  async function deleteAdminPhoto() {
+    setPhotoBusy(true);setError('');
+    const {data,error:photoError}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:null}});
+    if(photoError)setError(userFacingErrorMessage(photoError,'Could not remove your profile picture.'));
+    else {if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);setProfilePhoto('');}
+    setPhotoBusy(false);
+  }
+
   async function changeTenantStatus(tenant, status) {
     if (status === 'TRIAL') {
       await grantTenantTrial(tenant);
@@ -314,7 +365,7 @@ export default function SuperAdminApp() {
   const pendingBillingRequests=data.billingRequests.filter((request)=>request.status==='PENDING');
   const platformNotices=[...pending.map((request)=>({id:`request-${request.id}`,title:'Business request awaiting review',detail:`${request.tenant_name} · ${request.owner_name}`,section:'requests'})),...pendingBillingRequests.map((request)=>({id:`billing-${request.id}`,title:request.request_type==='TRIAL_EXTENSION'?'Free trial extension requested':'Plan payment needs verification',detail:`${data.tenants.find((tenant)=>tenant.id===request.tenant_id)?.name||'Business'} · ${request.payment_reference||'7-day extension'}`,section:'plans'})),...unpaidBillingRows.map((row)=>({id:`unpaid-${row.tenant.id}`,title:'Plan payment not recorded',detail:`${row.tenant.name} · ${row.subscription?date(row.subscription.ends_at):'No subscription'}`,section:'plans'})),...paidBillingRows.map((row)=>({id:`paid-${row.payment.id}`,title:'Plan payment confirmed',detail:`${row.tenant.name} · ${row.plan?.name||'Plan'} · KES ${money(row.payment.amount_kes)}`,section:'plans'}))];
 
-  return <div className={`pa-shell ${sidebarCollapsed?'is-collapsed':''} ${menuOpen?'menu-open':''}`} onPointerDownCapture={handleOutsidePointerDown}>
+  return <div className={`pa-shell ${sidebarCollapsed?'is-collapsed':''} ${menuOpen?'menu-open':''} ${theme==='dark'?'theme-dark':''} ${compactView?'compact-view':''}`} onPointerDownCapture={handleOutsidePointerDown}>
     <SearchableTables />
     <aside className="pa-sidebar">
       <div className="pa-sidebar-head"><a className="pa-brand" href="/"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span>PLATFORM CONTROL</span></a><button className="pa-sidebar-toggle" onClick={()=>{if(window.matchMedia('(max-width: 680px)').matches)setMenuOpen(false);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={menuOpen?'Close side menu':sidebarCollapsed?'Expand side menu':'Collapse side menu'} aria-expanded={window.matchMedia('(max-width: 680px)').matches?menuOpen:!sidebarCollapsed}>{menuOpen?<X size={19}/>:<Menu size={19}/>}</button></div>
@@ -347,7 +398,8 @@ export default function SuperAdminApp() {
         {section === 'settings' && <>
           <PageTitle eyebrow="PLATFORM PROFILE" title="Super Admin settings" description="Manage your platform profile and review the access attached to your administrator account."/>
           <div className="pa-settings-grid">
-            <section className="pa-panel pa-settings-panel"><div className="pa-panel-head"><div><h2>Administrator profile</h2><p>This name appears in the platform console and audit activity.</p></div></div><form onSubmit={saveAdminName}><label>Display name<input required minLength="2" maxLength="120" value={adminName} onChange={(event) => setAdminName(event.target.value)}/></label><label>Sign-in email<input value={session.user.email || ''} readOnly/></label><button className="pa-primary" disabled={busy}>Save profile</button></form></section>
+            <section className="pa-panel pa-settings-panel pa-admin-profile"><div className="pa-admin-profile-head"><div className="pa-admin-avatar">{profilePhoto?<img src={profilePhoto} alt="Profile"/>:initials(adminName)}</div><strong>{adminName||session.user.email}</strong><div className="pa-admin-photo-actions"><label className="pa-activate"><Camera size={15}/>{photoBusy?'Saving…':'Add profile picture'}<input type="file" accept="image/*" disabled={photoBusy} onChange={(event)=>saveAdminPhoto(event.target.files?.[0])}/></label>{profilePhoto&&<button type="button" className="pa-activate danger" disabled={photoBusy} onClick={deleteAdminPhoto}><Trash2 size={15}/>Delete picture</button>}</div></div><div className="pa-panel-head"><div><h2>Administrator profile</h2><p>This display name appears in the platform console and audit activity.</p></div></div><form onSubmit={saveAdminName}><label>Display name<input required minLength="2" maxLength="120" value={adminName} onChange={(event) => setAdminName(event.target.value)}/></label><label>Sign-in email<input value={session.user.email || ''} readOnly/></label><button className="pa-primary" disabled={busy}>Save profile</button></form></section>
+            <section className="pa-panel pa-settings-panel pa-admin-appearance"><h2>Appearance</h2><div className="pa-admin-setting-row"><b>Theme</b><div className="pa-admin-choice"><button className={theme==='light'?'selected':''} onClick={()=>saveAdminTheme('light')}><Sun size={15}/>Light</button><button className={theme==='dark'?'selected':''} onClick={()=>saveAdminTheme('dark')}><Moon size={15}/>Dark</button></div></div><div className="pa-admin-setting-row"><b>App layout</b><div className="pa-admin-choice"><button className={!compactView?'selected':''} onClick={()=>saveCompactView(false)}>App view</button><button className={compactView?'selected':''} onClick={()=>saveCompactView(true)}>Compact</button></div></div></section>
             <section className="pa-panel pa-settings-security"><ShieldCheck size={23}/><h2>Access and security</h2><p>Platform controls are limited to an active Super Admin membership.</p><div><span>Account role</span><b>Super Admin</b></div><div><span>Membership</span><b>{session.membership.status}</b></div><div><span>Business workspace access</span><b>Platform-wide</b></div><div><span>Sign-in account</span><b>{session.user.email || 'Email unavailable'}</b></div></section>
           </div>
         </>}
