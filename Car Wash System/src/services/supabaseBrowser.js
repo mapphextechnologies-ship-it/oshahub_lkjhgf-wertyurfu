@@ -56,7 +56,16 @@ export function userFacingErrorMessage(error, fallback = 'Something went wrong. 
   if (/email.*(invalid|valid)|invalid email/.test(normalized)) {
     return 'Enter a valid email address.';
   }
-  if (/permission denied|not authorized|active .* access is required|access denied|row-level security/.test(normalized) || code === '42501') {
+  if (/platform administrator access is required/.test(normalized)) {
+    return 'The database does not recognize this login as an active Super Admin. Verify its global membership in the same Supabase project used by this app.';
+  }
+  if (/business administrator access is required|active business administrator access is required/.test(normalized)) {
+    return 'The database does not recognize this login as an active Business Admin for this workspace. Check its membership and selected business.';
+  }
+  if (/permission denied for table|row-level security/.test(normalized)) {
+    return 'The database policy blocked this change. The deployed database permissions may be out of date; apply the latest Supabase migrations.';
+  }
+  if (/permission denied|not authorized|active .* access is required|access denied/.test(normalized) || code === '42501') {
     return 'You do not have permission to do that. Contact your business administrator if you need access.';
   }
   if (/not found|no longer exists|could not find/.test(normalized) || code === 'P0002') {

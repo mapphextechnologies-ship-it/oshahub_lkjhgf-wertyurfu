@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, Search, Settings, ShieldCheck, Smartphone, Trash2, X } from 'lucide-react';
+import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Trash2, X } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
 
-const EMPTY_DATA = { tenants: [], requests: [], plans: [], subscriptions: [], subscriptionPayments: [], billingRequests: [], billingSchemaReady: true };
+const EMPTY_DATA = { tenants: [], requests: [], plans: [], subscriptions: [], subscriptionPayments: [], billingRequests: [], deletedRecords: [], billingSchemaReady: true };
 
 export default function SuperAdminApp() {
   const [session, setSession] = useState(null);
@@ -29,6 +29,7 @@ export default function SuperAdminApp() {
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
   const [planSelections, setPlanSelections] = useState({});
   const [adminName, setAdminName] = useState('');
+  const [grantingTrial, setGrantingTrial] = useState('');
 
   useEffect(() => { setAdminName(session?.membership.full_name || ''); }, [session?.membership.full_name]);
 
@@ -65,19 +66,30 @@ export default function SuperAdminApp() {
     if (!supabaseBrowser) return;
     if (!quiet) setBusy(true);
     setError('');
-    const [tenants, requests, plans, subscriptions, subscriptionPayments, billingRequests] = await Promise.all([
+    const [tenants, requests, plans, subscriptions, subscriptionPayments, billingRequests, deletedRecords] = await Promise.all([
       supabaseBrowser.from('carwash_tenants').select('id,name,owner_name,status,created_at').order('created_at', { ascending: false }),
       supabaseBrowser.from('carwash_access_requests').select('id,tenant_name,owner_name,phone,status,created_at').order('created_at', { ascending: false }),
-      supabaseBrowser.from('carwash_plans').select('id,name,price_kes,duration_days,feature_flags,active').order('price_kes'),
+      supabaseBrowser.from('carwash_plans').select('id,name,price_kes,duration_days,feature_flags,active').is('deleted_at', null).order('price_kes'),
       supabaseBrowser.from('carwash_subscriptions').select('*').order('starts_at', { ascending: false }),
       supabaseBrowser.from('carwash_subscription_payments').select('*').order('paid_at', { ascending: false }),
-      supabaseBrowser.from('carwash_billing_requests').select('*').order('created_at', { ascending: false })
+      supabaseBrowser.from('carwash_billing_requests').select('*').order('created_at', { ascending: false }),
+      supabaseBrowser.rpc('carwash_list_deleted_admin_records')
     ]);
     const failed = [tenants, requests, plans, subscriptions].find((result) => result.error);
     if (failed) setError(userFacingErrorMessage(failed.error,'Could not load the business data. Refresh and try again.'));
     else {
       const billingSchemaReady=!subscriptionPayments.error;
-      setData({ tenants: tenants.data || [], requests: requests.data || [], plans: plans.data || [], subscriptions: subscriptions.data || [], subscriptionPayments: subscriptionPayments.data || [], billingRequests: billingRequests.error ? [] : billingRequests.data || [], billingSchemaReady });
+      const subscriptionRows = subscriptions.data || [];
+      const tenantRows = (tenants.data || []).map((tenant) => {
+        const current = subscriptionRows.find((row) => row.tenant_id === tenant.id);
+        const expired = Boolean(current && ['TRIAL', 'ACTIVE', 'EXPIRING SOON', 'EXPIRED'].includes(current.status) && current.ends_at
+          && new Date(current.ends_at).getTime() <= Date.now()
+          && (!current.grace_until || new Date(current.grace_until).getTime() <= Date.now()));
+        return expired && ['TRIAL', 'ACTIVE', 'EXPIRING SOON'].includes(tenant.status)
+          ? { ...tenant, status: 'EXPIRED' }
+          : tenant;
+      });
+      setData({ tenants: tenantRows, requests: requests.data || [], plans: plans.data || [], subscriptions: subscriptionRows, subscriptionPayments: subscriptionPayments.data || [], billingRequests: billingRequests.error ? [] : billingRequests.data || [], deletedRecords: deletedRecords.error ? [] : deletedRecords.data || [], billingSchemaReady });
       if(!billingSchemaReady)setError('Confirmed payment totals are temporarily unavailable. Contact support if the problem continues.');
     }
     if (!quiet) setBusy(false);
@@ -132,13 +144,13 @@ export default function SuperAdminApp() {
 
   async function deleteRequests(ids) {
     const requestIds = [...new Set(ids)];
-    if (!requestIds.length || !window.confirm(`Delete ${requestIds.length} selected request record${requestIds.length === 1 ? '' : 's'}? This removes application records only; approved business accounts remain active.`)) return;
+    if (!requestIds.length || !window.confirm(`Move ${requestIds.length} selected request record${requestIds.length === 1 ? '' : 's'} to Recently deleted? You can restore them later; approved business accounts remain active.`)) return;
     setDeletingRequests(true); setError(''); setNotice('');
     try {
       const { data: deleted, error: deleteError } = await supabaseBrowser.rpc('carwash_delete_business_requests', { p_request_ids: requestIds }).abortSignal(AbortSignal.timeout(15000));
       if (deleteError) setError(deleteError.code === 'PGRST202' ? 'This action is temporarily unavailable. Contact support if the problem continues.' : userFacingErrorMessage(deleteError,'Could not delete the selected requests. Refresh and try again.'));
       else if (!Number.isInteger(deleted) || deleted !== requestIds.length) { setError('Some requests could not be deleted. Refresh the list and try again.'); void loadData({ quiet: true }); }
-      else { setSelectedRequests([]); setData((old)=>({...old,requests:old.requests.filter((request)=>!requestIds.includes(request.id))})); setNotice(`${deleted} request${deleted === 1 ? '' : 's'} deleted. Approved business accounts remain active.`); void loadData({ quiet: true }).catch((refreshError)=>setError(userFacingErrorMessage(refreshError,'Requests were deleted, but the list could not refresh.'))); }
+      else { setSelectedRequests([]); setData((old)=>({...old,requests:old.requests.filter((request)=>!requestIds.includes(request.id))})); setNotice(`${deleted} request${deleted === 1 ? '' : 's'} moved to Recently deleted. Approved business accounts remain active.`); void loadData({ quiet: true }).catch((refreshError)=>setError(userFacingErrorMessage(refreshError,'Requests were moved, but the list could not refresh.'))); }
     } catch (deleteError) { setError(deleteError.name === 'TimeoutError' || deleteError.name === 'AbortError' ? 'The deletion took too long. Check your connection and refresh the request list before trying again.' : userFacingErrorMessage(deleteError,'Could not delete these requests.')); }
     finally { setDeletingRequests(false); }
   }
@@ -189,6 +201,10 @@ export default function SuperAdminApp() {
   }
 
   async function changeTenantStatus(tenant, status) {
+    if (status === 'TRIAL') {
+      await grantTenantTrial(tenant);
+      return;
+    }
     setBusy(true); setError(''); setNotice('');
     try {
       const { error: updateError } = await supabaseBrowser.rpc('carwash_update_platform_tenant',{target_tenant:tenant.id,p_name:tenant.name,p_owner_name:tenant.owner_name,p_status:status});
@@ -196,6 +212,31 @@ export default function SuperAdminApp() {
       else { setNotice(`${tenant.name} updated to ${status}.`); await loadData(); }
     } catch (updateError) { setError(userFacingErrorMessage(updateError,'Could not update this business. Try again.')); }
     finally { setBusy(false); }
+  }
+
+  async function grantTenantTrial(tenant) {
+    if (!window.confirm(`Grant ${tenant.name} a new 7-day trial starting now?`)) return;
+    setGrantingTrial(tenant.id); setBusy(true); setError(''); setNotice('');
+    try {
+      const { error: grantError } = await supabaseBrowser.rpc('carwash_grant_tenant_trial', { target_tenant: tenant.id });
+      if (grantError) throw grantError;
+      setNotice(`A new 7-day trial was granted to ${tenant.name}.`);
+      await loadData();
+    } catch (grantError) {
+      setError(userFacingErrorMessage(grantError, 'Could not grant a new trial. Refresh and try again.'));
+    } finally { setGrantingTrial(''); setBusy(false); }
+  }
+
+  async function restoreDeletedRecord(record) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const { error: restoreError } = await supabaseBrowser.rpc('carwash_restore_admin_record', { p_entity_type: record.entity_type, p_record_id: record.entity_id });
+      if (restoreError) throw restoreError;
+      setNotice(`${record.label} restored.`);
+      await loadData();
+    } catch (restoreError) {
+      setError(userFacingErrorMessage(restoreError, 'Could not restore this record. Refresh and try again.'));
+    } finally { setBusy(false); }
   }
 
   async function updateTenantDetails(tenant, fields) {
@@ -229,9 +270,9 @@ export default function SuperAdminApp() {
     const protectedPlans=selected.filter((id)=>data.subscriptions.some((row)=>row.plan_id===id)||data.subscriptionPayments.some((row)=>row.plan_id===id)||data.billingRequests.some((row)=>row.plan_id===id));
     const deletable=selected.filter((id)=>!protectedPlans.includes(id));
     if(!deletable.length){setError('These plans are linked to subscriptions, payment history or billing requests, so they must stay for records.');return;}
-    if(!window.confirm(`Delete ${deletable.length} unused plan${deletable.length===1?'':'s'}? Plans with billing history will be kept.`))return;
+    if(!window.confirm(`Move ${deletable.length} unused plan${deletable.length===1?'':'s'} to Recently deleted? You can restore them later. Plans with billing history will be kept.`))return;
     setDeletingPlans(true);setError('');setNotice('');
-    try{const {data:deleted,error:deleteError}=await supabaseBrowser.rpc('carwash_delete_unused_plans',{p_plan_ids:deletable}).abortSignal(AbortSignal.timeout(15000));if(deleteError)throw deleteError;if(!Number.isInteger(deleted)||deleted!==deletable.length)throw new Error('Some selected plans are in use or no longer available. Refresh the list; plans with billing history are kept.');setSelectedPlanIds([]);setNotice(`${deleted} unused plan${deleted===1?'':'s'} deleted.${protectedPlans.length?` ${protectedPlans.length} linked plan${protectedPlans.length===1?' was':'s were'} kept.`:''}`);await loadData();}
+    try{const {data:deleted,error:deleteError}=await supabaseBrowser.rpc('carwash_delete_unused_plans',{p_plan_ids:deletable}).abortSignal(AbortSignal.timeout(15000));if(deleteError)throw deleteError;if(!Number.isInteger(deleted)||deleted!==deletable.length)throw new Error('Some selected plans are in use or no longer available. Refresh the list; plans with billing history are kept.');setSelectedPlanIds([]);setNotice(`${deleted} unused plan${deleted===1?'':'s'} moved to Recently deleted.${protectedPlans.length?` ${protectedPlans.length} linked plan${protectedPlans.length===1?' was':'s were'} kept.`:''}`);await loadData();}
     catch(deleteError){setError(deleteError.code==='PGRST202'?'This action is temporarily unavailable. Contact support if the problem continues.':userFacingErrorMessage(deleteError,'Could not delete unused plans.'))}
     finally{setDeletingPlans(false);}
   }
@@ -283,8 +324,8 @@ export default function SuperAdminApp() {
           <PlatformActivityChart tenants={data.tenants} payments={data.subscriptionPayments}/>
         </>}
         {section === 'requests' && <><PageTitle eyebrow="ACCESS REVIEW" title="Business requests" description="Approve, re-approve, reject, or clear business registration requests."/><div className="pa-bulk-actions"><span>{selectedRequests.length} selected{deletingRequests?' · Deleting…':''}</span><button disabled={busy || deletingRequests || (!data.requests.length&&!selectedRequests.length)} onClick={() => selectedRequests.length ? setSelectedRequests([]) : setSelectedRequests(data.requests.slice(0,250).map((request) => request.id))}>{selectedRequests.length?'Deselect all':'Select up to 250'}</button><button disabled={!selectedRequests.length || deletingRequests} onClick={() => setSelectedRequests([])}>Clear selection</button><button className="danger" disabled={busy || deletingRequests || !data.requests.some((request) => request.status === 'REJECTED')} onClick={() => deleteRequests(data.requests.filter((request) => request.status === 'REJECTED').slice(0,250).map((request) => request.id))}>Clear rejected</button><button className="danger" disabled={busy || deletingRequests || !selectedRequests.length} onClick={() => deleteRequests(selectedRequests)}><Trash2 size={14}/> {deletingRequests?'Deleting…':'Delete selected'}</button></div><section className="pa-panel"><RequestTable requests={data.requests} onReview={reviewRequest} busy={busy || deletingRequests} selectedIds={selectedRequests} onToggle={(id) => setSelectedRequests((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id])} selectable/></section></>}
-        {section === 'businesses' && <><PageTitle eyebrow="TENANT DIRECTORY" title="Businesses" description="Manage tenant access and monitor account status."/><div className="pa-search"><Search size={17}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business or owner"/></div><section className="pa-panel"><TenantTable tenants={filteredTenants} onStatus={changeTenantStatus} onUpdate={updateTenantDetails} selectedIds={selectedTenantIds} onToggle={(id)=>setSelectedTenantIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedTenantIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClear={()=>setSelectedTenantIds([])} busy={busy}/></section></>}
-        {section === 'recent-businesses' && <><PageTitle eyebrow="NEW ACCOUNTS" title="Recent businesses" description="The latest businesses registered on the OshaHub platform."/><section className="pa-panel"><TenantTable tenants={[...data.tenants].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0)).slice(0,10)} onStatus={changeTenantStatus} onUpdate={updateTenantDetails} selectedIds={selectedTenantIds} onToggle={(id)=>setSelectedTenantIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedTenantIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClear={()=>setSelectedTenantIds([])} busy={busy}/></section></>}
+        {section === 'businesses' && <><PageTitle eyebrow="TENANT DIRECTORY" title="Businesses" description="Manage tenant access and monitor account status."/><div className="pa-search"><Search size={17}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search business or owner"/></div><section className="pa-panel"><TenantTable tenants={filteredTenants} onStatus={changeTenantStatus} onUpdate={updateTenantDetails} onGrantTrial={grantTenantTrial} grantingTrial={grantingTrial} selectedIds={selectedTenantIds} onToggle={(id)=>setSelectedTenantIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedTenantIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClear={()=>setSelectedTenantIds([])} busy={busy}/></section></>}
+        {section === 'recent-businesses' && <><PageTitle eyebrow="NEW ACCOUNTS" title="Recent businesses" description="The latest businesses registered on the OshaHub platform."/><section className="pa-panel"><TenantTable tenants={[...data.tenants].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0)).slice(0,10)} onStatus={changeTenantStatus} onUpdate={updateTenantDetails} onGrantTrial={grantTenantTrial} grantingTrial={grantingTrial} selectedIds={selectedTenantIds} onToggle={(id)=>setSelectedTenantIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedTenantIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClear={()=>setSelectedTenantIds([])} busy={busy}/></section></>}
         {section === 'activation' && <><PageTitle eyebrow="SUBSCRIPTION CONTROL" title="Activate a business plan" description="Review a business subscription and confirm its recorded payment before activating access."/><section className="pa-panel"><div className="pa-panel-head"><div><h2>Business plan activation</h2><p>Choose the plan for each business. Payment confirmation is recorded before access changes.</p></div></div><TenantPlanTable tenants={data.tenants} plans={data.plans.filter((plan) => plan.active)} subscriptions={data.subscriptions} payments={data.subscriptionPayments} selections={planSelections} onSelect={(tenantId,planId) => setPlanSelections((old) => ({ ...old, [tenantId]: planId }))} onActivate={activatePlan} busy={busy} selectedIds={selectedActivationTenantIds} onToggle={(id)=>setSelectedActivationTenantIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedActivationTenantIds(ids.slice(0,100))} onClear={()=>setSelectedActivationTenantIds([])}/><div className="pa-plan-foot">Each confirmation records the plan amount and payment method, activates the tenant plan and notifies the business team.</div></section></>}
         {section === 'reconciliation' && <><PageTitle eyebrow="PAYMENT OPERATIONS" title="Reconciliation" description="Compare confirmed payments with the current subscription status for each business."/><BillingDashboard rows={billingRows} tenants={data.tenants} plans={data.plans} paidRows={paidBillingRows} unpaidRows={unpaidBillingRows} payments={data.subscriptionPayments} collected={collected} ready={data.billingSchemaReady} onViewPlans={()=>setSection('plans')} onUpdateTenant={openTenantPlan}/></>}
         {section === 'plans' && <><PageTitle eyebrow="SUBSCRIPTIONS" title="Plans & billing" description="Review customer payment requests, subscription terms and payment history."/><section className="pa-panel"><div className="pa-panel-head"><div><h2>Customer billing requests</h2><p>Verify receipts and review one-time trial extensions.</p></div><span className="pa-status pending">{pendingBillingRequests.length} pending</span></div><BillingRequestsTable requests={pendingBillingRequests} tenants={data.tenants} plans={data.plans} onReview={reviewBillingRequest} busy={busy}/></section><section className="pa-panel"><h2>Recent confirmed payments</h2><PlatformPaymentsTable payments={data.subscriptionPayments} tenants={data.tenants} plans={data.plans} onUpdateTenant={openTenantPlan}/></section><section className="pa-panel"><h2>Available plans</h2><PlanTable plans={data.plans} onUpdate={updatePlan} busy={busy} selectedIds={selectedPlanIds} onToggle={(id)=>setSelectedPlanIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedPlanIds(ids.slice(0,100))} onClear={()=>setSelectedPlanIds([])} onDelete={()=>deleteSelectedPlans(selectedPlanIds)} deleting={deletingPlans}/></section></>}
@@ -295,6 +336,8 @@ export default function SuperAdminApp() {
             <section className="pa-panel pa-settings-security"><ShieldCheck size={23}/><h2>Access and security</h2><p>Platform controls are limited to an active Super Admin membership.</p><div><span>Account role</span><b>Super Admin</b></div><div><span>Membership</span><b>{session.membership.status}</b></div><div><span>Business workspace access</span><b>Platform-wide</b></div><div><span>Sign-in account</span><b>{session.user.email || 'Email unavailable'}</b></div></section>
           </div>
         </>}
+        {section === 'requests' && <DeletedRecordsPanel records={data.deletedRecords.filter((record) => record.entity_type === 'ACCESS_REQUEST')} onRestore={restoreDeletedRecord} busy={busy}/>}
+        {section === 'plans' && <DeletedRecordsPanel records={data.deletedRecords.filter((record) => record.entity_type === 'PLAN')} onRestore={restoreDeletedRecord} busy={busy}/>}
       </section>
     </main>
         {activationTenant&&<div className="pa-drawer-backdrop" onMouseDown={(event)=>{if(event.target===event.currentTarget)setActivationTenant(null);}}><aside className="pa-drawer"><header><div><span>PAYMENT CONFIRMATION</span><h2>{activationTenant.tenant_name||activationTenant.name}</h2><p>{activationTenant.owner_name}</p></div><button className="pa-drawer-close" type="button" onClick={()=>setActivationTenant(null)} aria-label="Close"><X size={18}/></button></header><form onSubmit={confirmPlanActivation}><div className="pa-drawer-plan"><small>PLAN TO ACTIVATE</small><strong>{activationTenant.selectedPlan?.name}</strong><span>Plan KES {money(activationTenant.selectedPlan?.price_kes)} · {activationTenant.selectedPlan?.duration_days} days</span><label>Business branches<input type="number" min="1" max="100" value={activationTenant.selectedPlan?.branchCount||1} onChange={(event)=>setActivationTenant((old)=>{const count=Math.max(1,Math.min(100,Number(event.target.value)||1));const onboardingFee=data.subscriptionPayments.some((payment)=>payment.tenant_id===old.id)?0:8500*count;return {...old,selectedPlan:{...old.selectedPlan,branchCount:count,onboardingFee,totalDue:Number(old.selectedPlan.price_kes)+onboardingFee}}})}/></label><span>One-time onboarding · KES 8,500 per branch: KES {money(activationTenant.selectedPlan?.onboardingFee)}</span><strong>Total due KES {money(activationTenant.selectedPlan?.totalDue)}</strong></div><label>Payment method<select value={paymentMethod} onChange={(event)=>setPaymentMethod(event.target.value)}><option value="M-PESA">M-Pesa</option><option value="CASH">Cash</option><option value="CARD">Card</option><option value="BANK TRANSFER">Bank transfer</option></select></label><label>Payment reference <span>Optional</span><input value={paymentReference} onChange={(event)=>setPaymentReference(event.target.value)} placeholder="M-Pesa code or receipt number"/></label><p className="pa-drawer-note">Confirm only after the full total has reached OshaHub. The one-time KES 8,500 onboarding fee applies per branch on a business’s first paid plan.</p><button className="pa-primary" disabled={busy}><Check size={16}/>{busy?'Recording payment…':'Confirm payment and activate'}</button></form></aside></div>}
@@ -347,12 +390,13 @@ function RequestTable({ requests, onReview, busy, selectable = false, selectedId
     {requests.length === 0 && <EmptyState>No business requests to review.</EmptyState>}
   </div>;
 }
-function TenantTable({ tenants, onStatus, onUpdate, selectedIds=[], onToggle, onSelectAll, onClear, busy }) {
+function TenantTable({ tenants, onStatus, onUpdate, onGrantTrial, grantingTrial, selectedIds=[], onToggle, onSelectAll, onClear, busy }) {
   const [editingId,setEditingId]=useState('');const [editName,setEditName]=useState('');const [editOwner,setEditOwner]=useState('');
   function startEdit(tenant){setEditingId(tenant.id);setEditName(tenant.name);setEditOwner(tenant.owner_name);}
   async function saveEdit(tenant){if(await onUpdate(tenant,{name:editName,owner_name:editOwner}))setEditingId('');}
-  return <><div className="pa-bulk-actions"><span>{selectedIds.length} selected</span><button disabled={busy||(!tenants.length&&!selectedIds.length)} onClick={()=>selectedIds.length?onClear():onSelectAll(tenants.slice(0,100).map((tenant)=>tenant.id))}>{selectedIds.length?'Deselect all':'Select up to 100'}</button><button disabled={busy||!selectedIds.length} onClick={onClear}>Clear selection</button></div><div className="pa-table-wrap pa-tenant-table"><table><thead><tr><th aria-label="Select"/><th>BUSINESS</th><th>OWNER</th><th>STATUS</th><th>CREATED</th><th>ACCESS</th><th>ACTION</th></tr></thead><tbody>{tenants.map((tenant) => <tr key={tenant.id}><td><input type="checkbox" aria-label={`Select ${tenant.name}`} checked={selectedIds.includes(tenant.id)} disabled={busy||(!selectedIds.includes(tenant.id)&&selectedIds.length>=100)} onChange={()=>onToggle(tenant.id)}/></td><td>{editingId===tenant.id?<input aria-label="Business name" value={editName} onChange={(event)=>setEditName(event.target.value)}/>:<b>{tenant.name}</b>}<small className="pa-id">{tenant.id.slice(0, 8)}</small></td><td>{editingId===tenant.id?<input aria-label="Business owner" value={editOwner} onChange={(event)=>setEditOwner(event.target.value)}/>:tenant.owner_name}</td><td><StatusPill status={tenant.status}/></td><td>{date(tenant.created_at)}</td><td><select aria-label={`Change access for ${tenant.name}`} value={tenant.status} onChange={(event) => onStatus(tenant, event.target.value)}><option>TRIAL</option><option>ACTIVE</option><option>EXPIRING SOON</option><option>EXPIRED</option><option>SUSPENDED</option><option>CANCELLED</option></select></td><td>{editingId===tenant.id?<div className="pa-actions"><button type="button" disabled={busy} onClick={()=>saveEdit(tenant)}>Save</button><button type="button" className="pa-cancel" disabled={busy} onClick={()=>setEditingId('')}>Cancel</button></div>:<button className="pa-activate" disabled={busy} onClick={()=>startEdit(tenant)}>Update</button>}</td></tr>)}</tbody></table>{tenants.length === 0 && <EmptyState>No businesses are registered yet.</EmptyState>}</div></>;
+  return <><div className="pa-bulk-actions"><span>{selectedIds.length} selected</span><button disabled={busy||(!tenants.length&&!selectedIds.length)} onClick={()=>selectedIds.length?onClear():onSelectAll(tenants.slice(0,100).map((tenant)=>tenant.id))}>{selectedIds.length?'Deselect all':'Select up to 100'}</button><button disabled={busy||!selectedIds.length} onClick={onClear}>Clear selection</button></div><div className="pa-table-wrap pa-tenant-table"><table><thead><tr><th aria-label="Select"/><th>BUSINESS</th><th>OWNER</th><th>STATUS</th><th>CREATED</th><th>ACCESS</th><th>ACTION</th></tr></thead><tbody>{tenants.map((tenant) => <tr key={tenant.id}><td><input type="checkbox" aria-label={`Select ${tenant.name}`} checked={selectedIds.includes(tenant.id)} disabled={busy||(!selectedIds.includes(tenant.id)&&selectedIds.length>=100)} onChange={()=>onToggle(tenant.id)}/></td><td>{editingId===tenant.id?<input aria-label="Business name" value={editName} onChange={(event)=>setEditName(event.target.value)}/>:<b>{tenant.name}</b>}<small className="pa-id">{tenant.id.slice(0, 8)}</small></td><td>{editingId===tenant.id?<input aria-label="Business owner" value={editOwner} onChange={(event)=>setEditOwner(event.target.value)}/>:tenant.owner_name}</td><td><StatusPill status={tenant.status}/></td><td>{date(tenant.created_at)}</td><td><select aria-label={`Change access for ${tenant.name}`} disabled={busy||grantingTrial===tenant.id} value={tenant.status} onChange={(event) => onStatus(tenant, event.target.value)}><option>TRIAL</option><option>ACTIVE</option><option>EXPIRING SOON</option><option>EXPIRED</option><option>SUSPENDED</option><option>CANCELLED</option></select></td><td><div className="pa-actions">{editingId===tenant.id?<><button type="button" disabled={busy} onClick={()=>saveEdit(tenant)}>Save</button><button type="button" className="pa-cancel" disabled={busy} onClick={()=>setEditingId('')}>Cancel</button></>:<><button className="pa-activate" disabled={busy} onClick={()=>startEdit(tenant)}>Update</button>{tenant.status==='EXPIRED'&&<button className="pa-activate" disabled={busy||grantingTrial===tenant.id} onClick={()=>onGrantTrial(tenant)}>{grantingTrial===tenant.id?'Granting…':'Grant 7-day trial'}</button>}</>}</div></td></tr>)}</tbody></table>{tenants.length === 0 && <EmptyState>No businesses are registered yet.</EmptyState>}</div></>;
 }
+function DeletedRecordsPanel({records,onRestore,busy}){return <section className="pa-panel"><div className="pa-panel-head"><div><h2>Recently deleted</h2><p>Deleted records are retained and can be restored by a Super Admin.</p></div></div>{records.length?<div className="pa-table-wrap"><table><thead><tr><th>RECORD</th><th>DELETED</th><th>ACTOR</th><th>ACTION</th></tr></thead><tbody>{records.map((record)=><tr key={`${record.entity_type}-${record.entity_id}`}><td><b>{record.label}</b><small className="pa-id">{record.entity_type.replaceAll('_',' ')}</small></td><td>{date(record.deleted_at)}</td><td>{record.deleted_by||'—'}</td><td><button className="pa-activate" disabled={busy} onClick={()=>onRestore(record)}><RotateCcw size={14}/> Restore</button></td></tr>)}</tbody></table></div>:<EmptyState>There are no deleted records to restore.</EmptyState>}</section>;}
 function SelectionControls({rows,selectedIds,onSelectAll,onClear,disabled=false,onDelete,deleting=false,note}){return <div className="pa-bulk-actions"><span>{selectedIds.length} selected</span><button disabled={disabled||(!rows.length&&!selectedIds.length)} onClick={()=>selectedIds.length?onClear():onSelectAll(rows.slice(0,100).map((row)=>row.id))}>{selectedIds.length?'Deselect all':'Select up to 100'}</button><button disabled={disabled||!selectedIds.length} onClick={onClear}>Clear selection</button>{onDelete&&<button className="danger" disabled={disabled||deleting||!selectedIds.length} onClick={onDelete}><Trash2 size={13}/>{deleting?'Deleting…':'Delete selected'}</button>}{note&&<small>{note}</small>}</div>;}
 function PlanTable({plans,onUpdate,busy,selectedIds,onToggle,onSelectAll,onClear,onDelete,deleting}){
   const [editingId,setEditingId]=useState('');const [form,setForm]=useState({});const set=(key,value)=>setForm((old)=>({...old,[key]:value}));

@@ -1,4 +1,5 @@
 import { supabaseBrowser } from '../services/supabaseBrowser.js';
+import { getTrialRequestState } from './trialRequestState.js';
 
 const fail = (result) => { if (result.error) throw result.error; return result.data || []; };
 const time = (value) => value ? new Date(value).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
@@ -27,7 +28,7 @@ export async function loadLiveWorkspace(user) {
     user.role === 'Business Admin' ? supabaseBrowser.from('carwash_commission_ledger').select('*').eq('tenant_id', tenantId).order('recorded_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
     canSeeMoney ? supabaseBrowser.from('carwash_loyalty_accounts').select('*').eq('tenant_id', tenantId) : Promise.resolve({ data: [], error: null }),
     user.role === 'Business Admin' ? supabaseBrowser.from('carwash_audit_logs').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50) : Promise.resolve({ data: [], error: null }),
-    canSeeMoney ? supabaseBrowser.from('carwash_plans').select('id,name,price_kes,duration_days,feature_flags').eq('active', true).order('price_kes') : Promise.resolve({ data: [], error: null }),
+    canSeeMoney ? supabaseBrowser.from('carwash_plans').select('id,name,price_kes,duration_days,feature_flags').eq('active', true).is('deleted_at', null).order('price_kes') : Promise.resolve({ data: [], error: null }),
     user.role === 'Business Admin' ? supabaseBrowser.from('carwash_subscriptions').select('*').eq('tenant_id', tenantId).order('starts_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
     user.role === 'Business Admin' ? supabaseBrowser.from('carwash_subscription_payments').select('*').eq('tenant_id', tenantId).order('paid_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
     user.role === 'Business Admin' ? supabaseBrowser.from('carwash_billing_requests').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }) : Promise.resolve({ data: [], error: null }),
@@ -70,7 +71,9 @@ export async function loadLiveWorkspace(user) {
   const currentSubscription = subscriptions[0] || null;
   const currentPlan = plansRes.data.find((row) => row.id === currentSubscription?.plan_id) || null;
   const billingRequests = billingRequestsRes.error ? [] : billingRequestsRes.data || [];
-  const billing = { plans, subscriptions, payments: subscriptionPayments, currentSubscription, currentPlan, onboardingFee: 8500, onboardingFeeDue: subscriptionPayments.length === 0, requests: billingRequests, trialExtensionRequested: billingRequests.some((row) => row.request_type === 'TRIAL_EXTENSION'), pendingRequest: billingRequests.find((row) => row.status === 'PENDING') || null };
+  const trialRequestState = getTrialRequestState(currentSubscription, billingRequests, subscriptionPayments);
+  const pendingRequest = billingRequests.find((row) => row.status === 'PENDING') || null;
+  const billing = { plans, subscriptions, payments: subscriptionPayments, currentSubscription, currentPlan, onboardingFee: 8500, onboardingFeeDue: subscriptionPayments.length === 0, requests: billingRequests, trialExtensionRequested: trialRequestState.trialRequestPending, ...trialRequestState, pendingRequest };
   return { tenant, db: { activeTenantId: tenantId, tenants: [{ id: tenantId, name: tenant.name, owner: tenant.owner_name, plan: currentPlan?.name || user.planName || 'Free trial', status: tenant.status, branches: currentSubscription?.branch_count || 1 }], staff, services, customers, vehicles, jobs, payments, commissions, loyalty: [], audit, billing, settingsSchemaReady: tenantSettingsReady, settings: { businessName: tenant.name, branch: settings.branch || user.branch || 'Main branch', currency: 'KES', loyaltyRate: Number(settings.loyaltyRate ?? 1) } } };
 }
 
