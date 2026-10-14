@@ -410,7 +410,9 @@ body {
 .cw-booking-actions{display:flex;flex-wrap:wrap;gap:7px}
 .cw-booking-actions .cw-primary,.cw-booking-actions .cw-secondary,.cw-booking-actions .cw-danger-outline{min-height:34px;padding:7px 10px;font-size:12px}
 .cw-public-link-row{display:flex;flex-wrap:wrap;gap:8px;max-width:760px}
-.cw-public-link-row input{min-width:220px;flex:1}
+.cw-public-link-row input{min-width:0;max-width:520px;flex:1;text-overflow:ellipsis}
+.cw-public-link-empty{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:44px;max-width:680px;padding:10px 12px;border:1px dashed #bfd7c8;border-radius:10px;background:#f5fbf7;color:var(--cw-muted);font-size:13px;line-height:1.45}
+.cw-public-link-empty .cw-primary{flex:0 0 auto;white-space:nowrap}
 .cw-public-link-row a{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
 .cw-settings-help{margin:0;padding:0 22px 16px 68px;color:var(--cw-muted);font-size:13px;line-height:1.55}
 .cw-social-row{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
@@ -419,4 +421,4 @@ body {
 .cw-social-status i{width:8px;height:8px;border-radius:50%;background:#91a097}
 .cw-social-status.connected i{background:#16a34a;box-shadow:0 0 0 3px #16a34a20}
 .cw-social-status small{grid-column:2;color:var(--cw-muted);font-size:11px}
-@media(max-width:640px){.cw-public-booking{padding:16px 12px 36px}.cw-booking-brand{margin-bottom:16px}.cw-booking-brand img{width:145px}.cw-booking-card{padding:22px 17px;border-radius:15px}.cw-table-toolbar{align-items:stretch;flex-direction:column}.cw-table-search{width:100%}.cw-public-link-row{width:100%}.cw-public-link-row input{min-width:100%}.cw-settings-help{padding-left:20px}}
+@media(max-width:640px){.cw-public-booking{padding:16px 12px 36px}.cw-booking-brand{margin-bottom:16px}.cw-booking-brand img{width:145px}.cw-booking-card{padding:22px 17px;border-radius:15px}.cw-table-toolbar{align-items:stretch;flex-direction:column}.cw-table-search{width:100%}.cw-public-link-row{width:100%}.cw-public-link-row input{min-width:100%}.cw-public-link-empty{align-items:stretch;flex-direction:column}.cw-settings-help{padding-left:20px}}
