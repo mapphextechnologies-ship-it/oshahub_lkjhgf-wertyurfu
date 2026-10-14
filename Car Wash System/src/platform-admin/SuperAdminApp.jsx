@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Camera, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, Download, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, Moon, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sun, Trash2, UserRound, X } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
+import { cacheProfilePhoto, readProfilePhoto } from '../services/profilePhoto.js';
 import SearchableTables from '../components/SearchableTables.jsx';
 
 const EMPTY_DATA = { tenants: [], requests: [], plans: [], subscriptions: [], subscriptionPayments: [], billingRequests: [], deletedRecords: [], billingSchemaReady: true };
@@ -49,7 +50,7 @@ export default function SuperAdminApp() {
   useEffect(()=>{
     if(!session?.user)return;
     try{const saved=session.user.user_metadata?.oshaHubDismissedPlatformNotices;setDismissedPlatformNoticeIds(Array.isArray(saved)?saved:JSON.parse(window.localStorage.getItem(`osha-cw-platform-notices:${session.user.id}`)||'[]'));}catch{setDismissedPlatformNoticeIds([]);}
-    setProfilePhoto(session.user.user_metadata?.oshaHubAvatar||'');
+    setProfilePhoto(readProfilePhoto(session.user));
     setAccountEmail(session.user.email||'');
     try{const prefs=JSON.parse(window.localStorage.getItem(`osha-cw-preferences:${session.user.id}`)||'{}');setCompactView(Boolean(prefs.compactView));setSessionTimeout([15,30,60].includes(Number(prefs.sessionTimeout))?Number(prefs.sessionTimeout):30);setPlatformAlerts(prefs.paymentAlerts!==false);}catch{setCompactView(false);setSessionTimeout(30);setPlatformAlerts(true);}
     const savedTheme=session.user.user_metadata?.oshaHubTheme;
@@ -300,8 +301,9 @@ export default function SuperAdminApp() {
     try {
       const photo=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(new Error('This image could not be read.'));reader.onload=()=>{const image=new Image();image.onerror=()=>reject(new Error('This image could not be opened.'));image.onload=()=>{const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;const scale=Math.max(256/image.width,256/image.height);canvas.getContext('2d').drawImage(image,(256-image.width*scale)/2,(256-image.height*scale)/2,image.width*scale,image.height*scale);resolve(canvas.toDataURL('image/jpeg',.78));};image.src=String(reader.result);};reader.readAsDataURL(file);});
       setProfilePhoto(photo);
-      const {data,error:photoError}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo}});
+      const {data,error:photoError}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo,oshaHubAvatarDeleted:false}});
       if(photoError)throw photoError;
+      cacheProfilePhoto(session.user.id,photo);
       if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);
     } catch(photoError) {setProfilePhoto(previousPhoto);setError(userFacingErrorMessage(photoError,'Could not save your profile picture.'));}
     finally {setPhotoBusy(false);}
@@ -309,9 +311,9 @@ export default function SuperAdminApp() {
 
   async function deleteAdminPhoto() {
     setPhotoBusy(true);setError('');
-    const {data,error:photoError}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:null}});
+    const {data,error:photoError}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:null,oshaHubAvatarDeleted:true}});
     if(photoError)setError(userFacingErrorMessage(photoError,'Could not remove your profile picture.'));
-    else {if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);setProfilePhoto('');}
+    else {cacheProfilePhoto(session.user.id,'');if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);setProfilePhoto('');}
     setPhotoBusy(false);
   }
 

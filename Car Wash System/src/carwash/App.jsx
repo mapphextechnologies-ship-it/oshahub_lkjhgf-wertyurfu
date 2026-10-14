@@ -7,6 +7,7 @@ import {
   Settings, ShieldCheck, Share2, Sparkles, Store, Sun, Moon, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff, Trash2, Pencil, Camera
 } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
+import { cacheProfilePhoto, readProfilePhoto } from '../services/profilePhoto.js';
 import SearchableTables from '../components/SearchableTables.jsx';
 import PublicBookingPage from './PublicBookingPage.jsx';
 import { dbMethod, loadLiveBillingStatus, loadLiveStaff, loadLiveWorkspace } from './liveWorkspace.js';
@@ -159,7 +160,7 @@ export default function CarWashApp() {
         {const {error:noticeError}=await supabaseBrowser.rpc('carwash_notify_billing_status',{target_tenant:membership.tenant_id});if(noticeError)throw noticeError;}
         const {data:messages,error:messageError}=await supabaseBrowser.from('carwash_user_messages').select('id,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
         if(messageError)throw messageError;
-        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,phone:membership.phone||'',profilePhoto:authUser.user_metadata?.oshaHubAvatar||'',role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch||'',billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
+        if(active){const session={id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.email,phone:membership.phone||'',profilePhoto:readProfilePhoto(authUser),role,tenant_id:membership.tenant_id,tenant_name:tenant.name,branch:membership.branch||'',billingRestricted:canOperate===false,activationMessage:canOperate===false?`Your ${tenant.name} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant.name}.`:messages?.[0]?.body};saveSession(session);setUser(session);}
       }catch(error){if(active)setAuthRestoreError(supabaseErrorMessage(error,'Unable to reconnect your workspace. Check your connection and retry.'));}
       finally{if(active)setAuthLoading(false);}
     };
@@ -396,7 +397,7 @@ export default function CarWashApp() {
     const previous=user?.profilePhoto||'';
     const next={...user,profilePhoto:photo||''};setUser(next);saveSession(next);
     try{
-      if(user?.authUserId&&supabaseBrowser){const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo||null}});if(error)throw error;}
+      if(user?.authUserId&&supabaseBrowser){const {error}=await supabaseBrowser.auth.updateUser({data:{oshaHubAvatar:photo||null,oshaHubAvatarDeleted:!photo}});if(error)throw error;cacheProfilePhoto(user.authUserId,photo);}
       else {const key=`osha-cw-avatar:${user?.email||'guest'}`;if(photo)window.localStorage.setItem(key,photo);else window.localStorage.removeItem(key);}
     }catch(error){const restored={...user,profilePhoto:previous};setUser(restored);saveSession(restored);throw error;}
   }
@@ -833,7 +834,7 @@ function LoginScreen({onLogin,onBack,initialMode='login'}){
     const {data:messages}=await supabaseBrowser.from('carwash_user_messages').select('id,subject,body').eq('user_id',authUser.id).is('read_at',null).order('created_at',{ascending:false}).limit(1);
     const role=roleNames[membership.role];
     if(!role)throw new Error('This account has no supported portal role. Contact your administrator.');
-    onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,profilePhoto:authUser.user_metadata?.oshaHubAvatar||'',role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:billingRestricted?`Your ${tenant?.name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant?.name||'your business workspace'}.`:messages?.[0]?.body});
+    onLogin({id:authUser.id,authUserId:authUser.id,staffId:membership.id,email:authUser.email,name:membership.full_name||authUser.user_metadata?.full_name||authUser.email,profilePhoto:readProfilePhoto(authUser),role,tenant_id:membership.tenant_id,tenant_name:tenant?.name,branch:membership.branch,billingRestricted,activationMessage:billingRestricted?`Your ${tenant?.name||'business'} workspace is restricted because its plan has expired. Make a payment to continue using ${tenant?.name||'your business workspace'}.`:messages?.[0]?.body});
   }
   async function submit(event){
     event.preventDefault();setError('');setMessage('');setLoading(true);
