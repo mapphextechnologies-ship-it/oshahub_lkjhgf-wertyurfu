@@ -1,2 +1,7 @@
 [functions.mpesa-stk]
 verify_jwt = false
+
+# This endpoint handles the public Meta OAuth callback and validates user JWTs
+# itself for tenant actions, so gateway JWT enforcement is disabled.
+[functions.meta-social-connect]
+verify_jwt = false

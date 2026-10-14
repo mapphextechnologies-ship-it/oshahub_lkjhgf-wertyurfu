@@ -841,10 +841,13 @@ drop policy if exists cw_user_messages_read on public.carwash_user_messages;
 create policy cw_user_messages_read on public.carwash_user_messages for select using (user_id=auth.uid());
 drop policy if exists cw_user_messages_update on public.carwash_user_messages;
 create policy cw_user_messages_update on public.carwash_user_messages for update using (user_id=auth.uid()) with check (user_id=auth.uid());
+drop policy if exists cw_user_messages_delete on public.carwash_user_messages;
+create policy cw_user_messages_delete on public.carwash_user_messages for delete using (user_id=auth.uid());
 drop policy if exists cw_staff_invites_admin_read on public.carwash_staff_invitations;
 create policy cw_staff_invites_admin_read on public.carwash_staff_invitations for select using (public.carwash_has_tenant_access(tenant_id,array['BUSINESS_ADMIN']));
 grant select on public.carwash_access_requests,public.carwash_user_messages to authenticated;
 grant update(read_at) on public.carwash_user_messages to authenticated;
+grant delete on public.carwash_user_messages to authenticated;
 grant select on public.carwash_staff_invitations to authenticated;
 
 revoke all on function public.carwash_is_platform_admin() from public, anon;

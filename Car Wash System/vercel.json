@@ -89,6 +89,10 @@
   "redirects": [],
   "rewrites": [
     {
+      "source": "/book/(.*)",
+      "destination": "/index.html"
+    },
+    {
       "source": "/washer",
       "destination": "/index.html"
     },

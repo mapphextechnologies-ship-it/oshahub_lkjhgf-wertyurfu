@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
 import SearchableTables from '../components/SearchableTables.jsx';
+import PublicBookingPage from './PublicBookingPage.jsx';
 import { dbMethod, loadLiveBillingStatus, loadLiveStaff, loadLiveWorkspace } from './liveWorkspace.js';
 import { getTrialRequestState } from './trialRequestState.js';
 import {
@@ -20,10 +21,10 @@ const ROLE_NAV = {
     ['overview','Overview',LayoutDashboard],['tenants','Businesses',Store],['plans','Plans & billing',Wallet],['reports','Platform reports',FileBarChart2],['audit','Audit & security',ShieldCheck]
   ],
   'Business Admin': [
-    ['overview','Overview',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['services','Services & pricing',Sparkles],['staff','Staff',Users],['payments','Payments',CreditCard],['commissions','Commissions',CircleDollarSign],['loyalty','Loyalty',BadgeCheck],['reports','Reports',FileBarChart2],['audit','Audit & activity',ShieldCheck],['plans-billing','Plans & billing',Wallet],['settings','Settings',Settings]
+    ['overview','Overview',LayoutDashboard],['jobs','Wash queue',Waves],['bookings','Online bookings',CalendarDays],['customers','Customers & vehicles',Users],['services','Services & pricing',Sparkles],['staff','Staff',Users],['payments','Payments',CreditCard],['commissions','Commissions',CircleDollarSign],['loyalty','Loyalty',BadgeCheck],['reports','Reports',FileBarChart2],['audit','Audit & activity',ShieldCheck],['plans-billing','Plans & billing',Wallet],['settings','Settings',Settings]
   ],
   Receptionist: [
-    ['overview','Today’s operations',LayoutDashboard],['jobs','Wash queue',Waves],['customers','Customers & vehicles',Users],['payments','Payments',CreditCard],['reports','Reports',FileBarChart2],['settings','Settings',Settings]
+    ['overview','Today’s operations',LayoutDashboard],['jobs','Wash queue',Waves],['bookings','Online bookings',CalendarDays],['customers','Customers & vehicles',Users],['payments','Payments',CreditCard],['reports','Reports',FileBarChart2],['settings','Settings',Settings]
   ],
   Washer: [
     ['overview','My jobs',LayoutDashboard],['jobs','Assigned jobs',Waves],['history','Job history',History],['settings','Settings',Settings]
@@ -58,6 +59,7 @@ export default function CarWashApp() {
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const inviteLink = new URLSearchParams(window.location.search).has('invite');
   const staffPortal = window.location.pathname === '/washer' ? 'washer' : window.location.pathname === '/receptionist' ? 'receptionist' : '';
+  const bookingSlug = window.location.pathname.match(/^\/book\/([a-z0-9-]+)\/?$/i)?.[1] || '';
   const initialAuthRoute=window.location.hash.match(/^#\/(login|register)(?:\?.*)?$/)?.[1];
   const [showLogin, setShowLogin] = useState(()=>inviteLink||Boolean(staffPortal)||Boolean(initialAuthRoute)||window.sessionStorage.getItem('cw-auth-view')==='login');
   const [authMode, setAuthMode] = useState(()=>inviteLink?'register':staffPortal?'login':initialAuthRoute==='register'?'register':initialAuthRoute==='admin'||initialAuthRoute==='login'?'login':window.sessionStorage.getItem('cw-auth-mode')||'login');
@@ -68,6 +70,7 @@ export default function CarWashApp() {
   const [appPreferences,setAppPreferences]=useState(DEFAULT_APP_PREFERENCES);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [selectedNotificationIds,setSelectedNotificationIds]=useState([]);
   const notificationsRef = useRef([]);
   const sidebarRef=useRef(null);
   const [modal, setModal] = useState('');
@@ -100,7 +103,7 @@ export default function CarWashApp() {
     return()=>{window.removeEventListener('beforeinstallprompt',captureInstallPrompt);window.removeEventListener('appinstalled',installed);};
   },[]);
   useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
-  useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const metadata=data?.user?.user_metadata||{};if(['light','dark'].includes(metadata.oshaHubTheme))setTheme(metadata.oshaHubTheme);setUser((current)=>current?.authUserId===user.authUserId?{...current,profilePhoto:metadata.oshaHubAvatar||''}:current);}});return()=>{active=false;};},[user?.authUserId]);
+  useEffect(()=>{if(!user?.authUserId||!supabaseBrowser)return undefined;let active=true;supabaseBrowser.auth.getUser().then(({data,error})=>{if(active&&!error){const metadata=data?.user?.user_metadata||{};if(['light','dark'].includes(metadata.oshaHubTheme))setTheme(metadata.oshaHubTheme);}});return()=>{active=false;};},[user?.authUserId]);
   useEffect(()=>{
     if(!user)return;
     try{
@@ -267,6 +270,7 @@ export default function CarWashApp() {
     const messageTimer=window.setInterval(refresh,30000);
     return()=>{active=false;window.clearInterval(timer);window.clearInterval(messageTimer);};
   },[user?.authUserId,user?.tenant_id,user?.billingRestricted,user?.role]);
+  useEffect(()=>setSelectedNotificationIds([]),[user?.authUserId]);
   useEffect(()=>{
     if(!user?.authUserId)return undefined;
     const key=activityKey(user.authUserId);
@@ -317,6 +321,26 @@ export default function CarWashApp() {
     if(/payment|receipt|m-pesa|mpesa|billing/.test(text))return appPreferences.paymentAlerts;
     return true;
   });
+  const allVisibleNotificationsSelected=visibleNotifications.length>0&&visibleNotifications.every((item)=>selectedNotificationIds.includes(item.id));
+  async function markAllNotificationsRead(){
+    const unread=visibleNotifications.filter((item)=>!item.read_at);
+    if(!unread.length)return;
+    const now=new Date().toISOString();
+    if(supabaseBrowser&&user?.authUserId){const {error}=await supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('user_id',user.authUserId).is('read_at',null);if(error){notify(userFacingErrorMessage(error,'Could not mark notifications as read.'));return;}}
+    setNotifications((old)=>old.map((item)=>item.read_at||!unread.some((entry)=>entry.id===item.id)?item:{...item,read_at:now}));
+  }
+  async function deleteSelectedNotifications(){
+    const ids=selectedNotificationIds.filter((id)=>visibleNotifications.some((item)=>item.id===id));
+    if(!ids.length)return;
+    if(supabaseBrowser&&user?.authUserId){const {error}=await supabaseBrowser.from('carwash_user_messages').delete().eq('user_id',user.authUserId).in('id',ids);if(error){notify(userFacingErrorMessage(error,'Could not delete the selected notifications.'));return;}}
+    const removed=new Set(ids);setNotifications((old)=>old.filter((item)=>!removed.has(item.id)));setSelectedNotificationIds([]);
+  }
+  async function markNotificationRead(item){
+    if(item.read_at)return;
+    const now=new Date().toISOString();
+    if(supabaseBrowser&&user?.authUserId){const {error}=await supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('id',item.id).eq('user_id',user.authUserId);if(error){notify(userFacingErrorMessage(error,'Could not mark this notification as read.'));return;}}
+    setNotifications((old)=>old.map((entry)=>entry.id===item.id?{...entry,read_at:now}:entry));
+  }
   const tenantId = user?.tenant_id || db.activeTenantId;
   const tenant = db.tenants.find((item)=>item.id===tenantId) || db.tenants[0];
   const scoped = (rows) => rows.filter((item)=>role==='SaaS Super Admin'||item.tenant_id===tenantId);
@@ -599,6 +623,7 @@ export default function CarWashApp() {
     return matches&&(filter==='All'||job.status===filter);
   });
 
+  if(bookingSlug)return <PublicBookingPage slug={bookingSlug}/>;
   if(authLoading)return <WorkspaceBootScreen/>;
   if(authRestoreError)return <WorkspaceBootScreen error={authRestoreError} onRetry={()=>{setAuthRestoreError('');setRestoreAttempt((attempt)=>attempt+1);}} onSignOut={()=>{void supabaseBrowser?.auth.signOut();clearSession();setUser(null);setAuthRestoreError('');setShowLogin(false);window.location.hash='/';}}/>;
   if(!user&&!showLogin)return <PublicLandingPage onLogin={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','login');window.location.hash='/login';setAuthMode('login');setShowLogin(true)}} onRegister={()=>{window.sessionStorage.setItem('cw-auth-view','login');window.sessionStorage.setItem('cw-auth-mode','register');window.location.hash='/register';setAuthMode('register');setShowLogin(true)}} />;
@@ -622,9 +647,10 @@ export default function CarWashApp() {
         <div className="cw-crumb"><span>{role==='SaaS Super Admin'?'Platform':tenant?.name}</span><ChevronRight size={14}/><b>{NAV_TITLES[screen]||'My profile'}</b></div>
         <div className="cw-top-actions"><span className="cw-date"><CalendarDays size={15}/>{todayLabel()}</span><div className="cw-notification-wrap">
           <button className="cw-icon-button cw-notification" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications" aria-expanded={notificationsOpen}><Bell size={18}/>{notificationCount>0&&<i>{notificationCount>99?'99+':notificationCount}</i>}</button>
-          {notificationsOpen&&<div className="cw-notification-panel"><div className="cw-notification-head"><b>Notification center</b><button onClick={()=>{const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('user_id',user.authUserId).is('read_at',null).then(()=>setNotifications((old)=>old.map((item)=>({...item,read_at:item.read_at||now}))));}}>Mark all read</button></div>
+          {notificationsOpen&&<div className="cw-notification-panel"><div className="cw-notification-head"><b>Notification center</b><button onClick={markAllNotificationsRead}>Mark all read</button></div>
+            <div className="cw-notification-toolbar"><label><input type="checkbox" checked={allVisibleNotificationsSelected} disabled={!visibleNotifications.length} onChange={(event)=>setSelectedNotificationIds(event.target.checked?visibleNotifications.map((item)=>item.id):[])}/>Select all</label><span>{selectedNotificationIds.length} selected</span><button type="button" disabled={!selectedNotificationIds.length} onClick={deleteSelectedNotifications}><Trash2 size={14}/>Delete selected</button></div>
             {visibleUnpaidJobs.length>0&&<button className="cw-notification-item unpaid" onClick={()=>{navigate('payments');setNotificationsOpen(false);}}><b>{visibleUnpaidJobs.length} unpaid wash order{visibleUnpaidJobs.length===1?'':'s'}</b><span>Payments are still due at the front desk.</span><small>Open payments <ArrowRight size={12}/></small></button>}
-            {visibleNotifications.map((item)=><button key={item.id} className={`cw-notification-item ${item.read_at?'':'unread'}`} onClick={()=>{if(!item.read_at){const now=new Date().toISOString();supabaseBrowser.from('carwash_user_messages').update({read_at:now}).eq('id',item.id).then(()=>setNotifications((old)=>old.map((entry)=>entry.id===item.id?{...entry,read_at:now}:entry)));}}}><b>{item.subject}</b><span>{item.body}</span><small>{new Date(item.created_at).toLocaleString('en-KE')}</small></button>)}
+            {visibleNotifications.map((item)=><div key={item.id} className={`cw-notification-row ${item.read_at?'':'unread'}`}><input type="checkbox" aria-label={`Select notification: ${item.subject}`} checked={selectedNotificationIds.includes(item.id)} onChange={(event)=>setSelectedNotificationIds((old)=>event.target.checked?[...new Set([...old,item.id])]:old.filter((id)=>id!==item.id))}/><button className={`cw-notification-item ${item.read_at?'':'unread'}`} onClick={()=>markNotificationRead(item)}><b>{item.subject}</b><span>{item.body}</span><small>{new Date(item.created_at).toLocaleString('en-KE')}</small></button></div>)}
             {!visibleNotifications.length&&!visibleUnpaidJobs.length&&<p className="cw-notification-empty">You’re all caught up.</p>}
           </div>}
         </div><div className="cw-top-avatar">{user.profilePhoto?<img src={user.profilePhoto} alt=""/>:user.name.split(' ').map((part)=>part[0]).slice(0,2).join('')}</div></div>
@@ -635,6 +661,7 @@ export default function CarWashApp() {
         {!isStaffRole&&!user.billingRestricted&&visibleNotifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)&&<div className="cw-auth-alert billing-reminder" role="status"><b>Subscription reminder</b><br/>{visibleNotifications.find((item)=>isSubscriptionReminder(item)&&!item.read_at)?.body}</div>}
         {screen==='overview'&&<Overview db={db} role={role} user={user} jobs={workerJobs} payments={scoped(db.payments)} revenue={dailyRevenue} active={activeCount} ready={readyCount} onNavigate={navigate} onCreate={()=>setModal('order')}/>}
         {screen==='jobs'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} onCreate={()=>setModal('order')} onTransition={updateJob} onPayment={recordPayment} canDelete={['Business Admin','Receptionist'].includes(role)} selectedIds={selectedJobIds} deleting={deletingJobs} onToggle={(id)=>setSelectedJobIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedJobIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClearSelection={()=>setSelectedJobIds([])} onDelete={deleteWashOrders}/>}
+        {screen==='bookings'&&['Business Admin','Receptionist'].includes(role)&&<OnlineBookingsPage tenantId={tenantId} notify={notify}/>}
         {screen==='history'&&<JobsPage jobs={filteredJobs} db={db} role={role} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} history onTransition={updateJob} onPayment={recordPayment}/>}
         {screen==='customers'&&role!=='Washer'&&<CustomersPage customers={scopedCustomers} vehicles={scoped(db.vehicles)} query={query} setQuery={setQuery} onAdd={()=>setModal('customer')} canSelect={['Business Admin','Receptionist'].includes(role)} canEdit={['Business Admin','Receptionist'].includes(role)} onEdit={(customer)=>{setEditingCustomer({...customer,vehicles:scoped(db.vehicles).filter((vehicle)=>vehicle.customerId===customer.id)});setModal('customer-edit');}} canDelete={role==='Business Admin'} selectedIds={selectedCustomerIds} deleting={deletingCustomers} onToggle={(id)=>setSelectedCustomerIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedCustomerIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClearSelection={()=>setSelectedCustomerIds([])} onDelete={deleteCustomers}/>}
         {screen==='services'&&role==='Business Admin'&&<ServicesPage services={scopedServices} jobs={scopedJobs} canDelete={role==='Business Admin'} canEdit={role==='Business Admin'} onEdit={(service)=>{setEditingService(service);setModal('service-edit');}} selectedIds={selectedServiceIds} deleting={deletingServices} onToggle={(id)=>setSelectedServiceIds((old)=>old.includes(id)?old.filter((item)=>item!==id):old.length<100?[...old,id]:old)} onSelectAll={(ids)=>setSelectedServiceIds((old)=>[...new Set([...old,...ids])].slice(0,100))} onClearSelection={()=>setSelectedServiceIds([])} onDelete={deleteUnusedServices} onAdd={()=>setModal('service')} onChange={async(service)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.','error');return;}try{const {data:updated,error}=await supabaseBrowser.from('carwash_services').update({active:!service.active}).eq('id',service.id).eq('tenant_id',tenantId).select('id').maybeSingle();if(error)throw error;if(!updated)throw new Error('This service could not be found. Refresh the list and try again.');const {db:next}=await loadLiveWorkspace(user);setDb(next);}catch(error){notify(userFacingErrorMessage(error,'Could not update this service. Refresh and try again.'),'error');}}else patchDb((next)=>{const item=next.services.find((row)=>row.id===service.id);if(item)item.active=!item.active;return next;});}}/>}
@@ -648,7 +675,7 @@ export default function CarWashApp() {
         {screen==='tenants'&&<TenantsPage tenants={db.tenants} onAdd={()=>setModal('tenant')} onChange={(item,status)=>patchDb((next)=>{const row=next.tenants.find((x)=>x.id===item.id);if(row)row.status=status;return next;})}/>}
         {screen==='plans'&&<PlansPage plans={db.plans||[]} tenants={db.tenants} onAdd={()=>setModal('plan')}/>}
         {screen==='audit'&&<AuditPage rows={scoped(db.audit)}/>}
-        {screen==='settings'&&<SettingsPage db={db} user={user} role={role} theme={theme} appPreferences={appPreferences} onPreferenceChange={updateAppPreferences} onThemeChange={changeTheme} onChangeProfilePhoto={changeProfilePhoto} onCopyPortalLink={copyPortalAppLink} onInstallApp={installApp} onSaveProfile={saveOwnProfile} onNavigate={navigate} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Settings are temporarily unavailable. Contact support if the problem continues.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(userFacingErrorMessage(error,'Could not update business settings. Check the details and try again.'));return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
+        {screen==='settings'&&<SettingsPage db={db} user={user} role={role} tenantId={tenantId} theme={theme} appPreferences={appPreferences} onPreferenceChange={updateAppPreferences} onThemeChange={changeTheme} onChangeProfilePhoto={changeProfilePhoto} onCopyPortalLink={copyPortalAppLink} onInstallApp={installApp} onSaveProfile={saveOwnProfile} onNavigate={navigate} onSave={async(form)=>{if(user.authUserId){if(user.billingRestricted){notify('This plan is overdue. Workspace changes are read-only.');return;}if(!db.settingsSchemaReady){notify('Settings are temporarily unavailable. Contact support if the problem continues.');return;}const {error}=await supabaseBrowser.rpc('carwash_update_tenant_settings',{target_tenant:tenantId,p_business_name:form.businessName,p_branch:form.branch,p_loyalty_rate:form.loyaltyRate});if(error){notify(userFacingErrorMessage(error,'Could not update business settings. Check the details and try again.'));return;}const {db:next}=await loadLiveWorkspace(user);setDb(next);}else patchDb((next)=>{next.settings={...next.settings,...form};return next;});notify('Business settings updated.');}}/>}
         {screen==='profile'&&<ProfilePage user={user} tenant={tenant} onLogout={logout}/>}
       </section>
     </main>
@@ -994,7 +1021,16 @@ function CustomerBillingPage({billing,tenant,onRequest,onRefresh}){
 
 function AuditPage({rows}){return <><PageHeading title="Audit & security" subtitle="Recent operational events and sensitive account activity."/><div className="cw-security-banner"><ShieldCheck size={23}/><span><b>Tenant isolation is enforced</b><small>Business records are scoped to the signed in workspace.</small></span><StatusPill status="ACTIVE"/></div><div className="cw-panel cw-table-panel"><div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>EVENT</th><th>DETAIL</th><th>TIME</th><th>RESULT</th></tr></thead><tbody>{rows.map((row)=><tr key={row.id}><td><b>{row.action}</b></td><td>{row.detail}</td><td>{row.time}</td><td><span className="cw-pay-state paid"><CheckCircle2 size={13}/> Recorded</span></td></tr>)}</tbody></table></div></div></>}
 
-function SettingsPage({db,user,role,onSave,theme,onThemeChange,onChangeProfilePhoto,onCopyPortalLink,onInstallApp,appPreferences,onPreferenceChange,onSaveProfile,onNavigate}){
+function OnlineBookingsPage({tenantId,notify}){
+  const [rows,setRows]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[query,setQuery]=useState(''),[busyId,setBusyId]=useState('');
+  async function refresh(){setLoading(true);setError('');const {data,error:loadError}=await supabaseBrowser.from('carwash_public_bookings').select('*').eq('tenant_id',tenantId).order('starts_at',{ascending:false}).limit(250);if(loadError)setError(userFacingErrorMessage(loadError,'Could not load online bookings.'));else setRows(data||[]);setLoading(false);}
+  useEffect(()=>{void refresh();},[tenantId]);
+  async function review(row,status){setBusyId(row.id);const {error:reviewError}=await supabaseBrowser.rpc('carwash_review_public_booking',{p_booking:row.id,p_status:status});if(reviewError)notify(userFacingErrorMessage(reviewError,'Could not update this booking.'),'error');else{notify(status==='CONFIRMED'?'Booking confirmed.':status==='CANCELLED'?'Booking cancelled.':'Booking marked complete.');await refresh();}setBusyId('');}
+  const filtered=rows.filter((row)=>`${row.customer_name} ${row.customer_phone} ${row.vehicle_registration} ${row.service_name} ${row.status}`.toLowerCase().includes(query.toLowerCase()));
+  return <><PageHeading title="Online bookings" subtitle="Customer booking requests for this business." action={<button className="cw-secondary" onClick={()=>void refresh()}><History size={15}/>Refresh</button>}/><section className="cw-panel cw-table-panel"><div className="cw-table-toolbar"><label className="cw-table-search"><Search size={16}/><input aria-label="Search bookings" placeholder="Search bookings…" value={query} onChange={(event)=>setQuery(event.target.value)}/></label><span>{filtered.length} booking{filtered.length===1?'':'s'}</span></div>{error&&<p className="cw-account-feedback error" role="alert">{error}</p>}<div className="cw-table-wrap"><table className="cw-table"><thead><tr><th>CUSTOMER</th><th>SERVICE</th><th>VEHICLE</th><th>BOOKING TIME</th><th>PRICE</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>{filtered.map((row)=><tr key={row.id}><td><b>{row.customer_name}</b><small className="cw-booking-cell-sub">{row.customer_phone}{row.customer_email?` · ${row.customer_email}`:''}</small></td><td>{row.service_name}</td><td>{row.vehicle_registration}</td><td>{new Date(row.starts_at).toLocaleString('en-KE',{timeZone:'Africa/Nairobi',dateStyle:'medium',timeStyle:'short'})}</td><td>{formatKes(row.price_kes)}</td><td><StatusPill status={row.status}/></td><td><div className="cw-booking-actions">{row.status==='PENDING'&&<><button className="cw-primary" disabled={busyId===row.id} onClick={()=>void review(row,'CONFIRMED')}>Confirm</button><button className="cw-danger-outline" disabled={busyId===row.id} onClick={()=>void review(row,'CANCELLED')}>Decline</button></>}{row.status==='CONFIRMED'&&<><button className="cw-secondary" disabled={busyId===row.id} onClick={()=>void review(row,'COMPLETED')}>Complete</button><button className="cw-danger-outline" disabled={busyId===row.id} onClick={()=>void review(row,'CANCELLED')}>Cancel</button></>}</div></td></tr>)}</tbody></table>{loading&&<EmptyPanel title="Loading bookings" text="Fetching this workspace’s online bookings."/>}{!loading&&!filtered.length&&<EmptyPanel title={query?'No matching bookings':'No online bookings yet'} text={query?'Try another name, phone number or vehicle.':'Bookings submitted through your public link will appear here.'}/>}</div></section></>;
+}
+
+function SettingsPage({db,user,role,tenantId,onSave,theme,onThemeChange,onChangeProfilePhoto,onCopyPortalLink,onInstallApp,appPreferences,onPreferenceChange,onSaveProfile,onNavigate}){
   const [name,setName]=useState(user?.name||'');
   const [phone,setPhone]=useState(user?.phone||'');
   const [profileBranch,setProfileBranch]=useState(user?.branch||db.settings.branch||'Main branch');
@@ -1007,14 +1043,26 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange,onChangeProfilePh
   const [accountBusy,setAccountBusy]=useState(false);
   const [profileBusy,setProfileBusy]=useState(false);
   const [photoBusy,setPhotoBusy]=useState(false);
-  const [profilePhoto,setProfilePhoto]=useState(user?.profilePhoto||'');
+  const profilePhoto=user?.profilePhoto||'';
   const [accountMessage,setAccountMessage]=useState('');
   const [accountError,setAccountError]=useState('');
   const [profileMessage,setProfileMessage]=useState('');
   const [profileError,setProfileError]=useState('');
+  const [bookingSlug,setBookingSlug]=useState('');
+  const [bookingLinkCopied,setBookingLinkCopied]=useState(false);
+  const [socialConnections,setSocialConnections]=useState([]);
+  const [pendingSocialAccounts,setPendingSocialAccounts]=useState([]);
+  const [socialBusy,setSocialBusy]=useState('');
+  const [socialError,setSocialError]=useState('');
   const isBusinessAdmin=role==='Business Admin';
   const isReceptionist=role==='Receptionist';
   const isWasher=role==='Washer';
+  useEffect(()=>{if(!tenantId||!supabaseBrowser)return;let alive=true;supabaseBrowser.from('carwash_tenants').select('booking_slug').eq('id',tenantId).maybeSingle().then(({data})=>{if(alive)setBookingSlug(data?.booking_slug||'');});return()=>{alive=false;};},[tenantId]);
+  useEffect(()=>{if(!tenantId||!isBusinessAdmin||!supabaseBrowser)return;let alive=true;(async()=>{const [{data,error},{data:pendingData,error:pendingError}]=await Promise.all([supabaseBrowser.rpc('carwash_social_connection_status',{target_tenant:tenantId}),supabaseBrowser.rpc('carwash_pending_social_accounts',{target_tenant:tenantId})]);if(alive){if(error)setSocialError(userFacingErrorMessage(error,'Social connections are not available yet. Apply the latest database migration.'));else setSocialConnections(data||[]);if(!pendingError)setPendingSocialAccounts(pendingData||[]);}const result=new URLSearchParams(window.location.search).get('social_result');if(alive&&result){const messages={connected:'Social account connected and verified by Meta.',choose_account:'Choose which Page or Instagram account this business should use.',expired:'That social connection request expired. Try again.',instagram_page_required:'Connect an eligible Instagram professional account to a Facebook Page first.',failed:'Meta could not verify the social account. Check permissions and try again.'};setSocialError(messages[result]||'');const url=new URL(window.location.href);url.searchParams.delete('social_result');window.history.replaceState({},'',url.toString());}})();return()=>{alive=false;};},[tenantId,isBusinessAdmin]);
+  async function startSocialConnection(platform){setSocialBusy(platform);setSocialError('');const {data,error}=await supabaseBrowser.functions.invoke('meta-social-connect',{body:{action:'start',tenantId,platform}});setSocialBusy('');if(error||!data?.authorizationUrl){setSocialError(userFacingErrorMessage(error||new Error(data?.error||'Could not start Meta authorization.'),'Meta connection is not configured yet.'));return;}window.location.assign(data.authorizationUrl);}
+  async function disconnectSocial(platform){setSocialBusy(platform);setSocialError('');const {error}=await supabaseBrowser.functions.invoke('meta-social-connect',{body:{action:'disconnect',tenantId,platform}});if(error){setSocialError(userFacingErrorMessage(error,'Could not disconnect this account.'));setSocialBusy('');return;}setSocialConnections((items)=>items.filter((item)=>item.platform!==platform));setSocialBusy('');}
+  async function selectSocialAccount(id){setSocialBusy(id);const {error}=await supabaseBrowser.rpc('carwash_select_social_account',{p_pending_id:id});if(error)setSocialError(userFacingErrorMessage(error,'That account selection expired. Reconnect and try again.'));else{setSocialError('Social account connected and verified by Meta.');const [{data},{data:pendingData}]=await Promise.all([supabaseBrowser.rpc('carwash_social_connection_status',{target_tenant:tenantId}),supabaseBrowser.rpc('carwash_pending_social_accounts',{target_tenant:tenantId})]);setSocialConnections(data||[]);setPendingSocialAccounts(pendingData||[]);}setSocialBusy('');}
+  async function copyBookingLink(){if(!bookingSlug)return;const link=new URL(`/book/${bookingSlug}`,window.location.origin).toString();try{await navigator.clipboard.writeText(link);}catch{const input=document.createElement('textarea');input.value=link;input.setAttribute('readonly','');input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();const copied=document.execCommand('copy');input.remove();if(!copied)return;}setBookingLinkCopied(true);window.setTimeout(()=>setBookingLinkCopied(false),1800);}
   const photoInput=useRef(null);
   async function saveProfile(event){
     event.preventDefault();setProfileMessage('');setProfileError('');setProfileBusy(true);
@@ -1031,11 +1079,11 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange,onChangeProfilePh
       const image=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('This image could not be opened.'));img.src=String(reader.result);};reader.onerror=()=>reject(new Error('This image could not be read.'));reader.readAsDataURL(file);});
       const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;const ctx=canvas.getContext('2d');
       const scale=Math.max(256/image.width,256/image.height),width=image.width*scale,height=image.height*scale;ctx.drawImage(image,(256-width)/2,(256-height)/2,width,height);
-      const photo=canvas.toDataURL('image/jpeg',.78);await onChangeProfilePhoto(photo);setProfilePhoto(photo);
+      const photo=canvas.toDataURL('image/jpeg',.78);await onChangeProfilePhoto(photo);
     }catch(error){setProfileError(userFacingErrorMessage(error,'Could not update your profile picture.'));}
     finally{setPhotoBusy(false);if(photoInput.current)photoInput.current.value='';}
   }
-  async function removePhoto(){setPhotoBusy(true);setProfileError('');try{await onChangeProfilePhoto('');setProfilePhoto('');}catch(error){setProfileError(userFacingErrorMessage(error,'Could not remove your profile picture.'));}finally{setPhotoBusy(false);}}
+  async function removePhoto(){setPhotoBusy(true);setProfileError('');try{await onChangeProfilePhoto('');}catch(error){setProfileError(userFacingErrorMessage(error,'Could not remove your profile picture.'));}finally{setPhotoBusy(false);}}
   async function updateAccount(event){
     event.preventDefault();setAccountMessage('');setAccountError('');
     const emailChanged=accountEmail.trim().toLowerCase()!==(user?.email||'').toLowerCase();
@@ -1080,6 +1128,8 @@ function SettingsPage({db,user,role,onSave,theme,onThemeChange,onChangeProfilePh
         <SettingsRow icon={BadgeCheck} label="Loyalty earn rate"><input type="number" min="0" value={rate} onChange={(event)=>setRate(event.target.value)}/></SettingsRow>
         <div className="cw-settings-save"><button className="cw-primary" onClick={()=>onSave({businessName,branch,loyaltyRate:Math.max(0,K(rate))})}>Save business settings</button></div>
       </SettingsGroup>}
+      {(isBusinessAdmin||isReceptionist)&&<SettingsGroup title="Online booking"><SettingsRow icon={CalendarDays} label="Public booking link"><div className="cw-public-link-row"><input aria-label="Business booking link" readOnly value={bookingSlug?new URL(`/book/${bookingSlug}`,window.location.origin).toString():'Booking link unavailable'}/><button className="cw-secondary" type="button" disabled={!bookingSlug} onClick={()=>void copyBookingLink()}><Copy size={15}/>{bookingLinkCopied?'Copied':'Copy link'}</button><a className="cw-secondary" href={bookingSlug?`/book/${bookingSlug}`:undefined} target="_blank" rel="noreferrer" aria-disabled={!bookingSlug}>Preview</a></div></SettingsRow><p className="cw-settings-help">Share this link on your social pages or with customers. Bookings submitted from it are visible only to this business’s receptionists and administrators.</p></SettingsGroup>}
+      {isBusinessAdmin&&<SettingsGroup title="Social media"><p className="cw-settings-help">Connect your business Facebook Page or eligible Instagram professional account. Access tokens are encrypted on the server and never returned to this page.</p>{['FACEBOOK','INSTAGRAM'].map((platform)=>{const connection=socialConnections.find((item)=>item.platform===platform);const expired=Boolean(connection?.expires_at&&new Date(connection.expires_at)<=Date.now());return <SettingsRow key={platform} icon={Share2} label={platform==='FACEBOOK'?'Facebook':'Instagram'}><div className="cw-social-row"><span className={`cw-social-status ${connection&&!expired?'connected':''}`}><i/>{connection?(expired?'Connection expired':'Connected'):'Not connected'}{connection?.account_name&&<small>{connection.account_name}</small>}</span>{connection&&<button className="cw-danger-outline" type="button" disabled={Boolean(socialBusy)} onClick={()=>void disconnectSocial(platform)}>Disconnect</button>}<button className="cw-secondary" type="button" disabled={Boolean(socialBusy)} onClick={()=>void startSocialConnection(platform)}>{socialBusy===platform?'Connecting…':connection?'Reconnect':'Connect'}</button></div></SettingsRow>;})}{pendingSocialAccounts.map((account)=><SettingsRow key={account.id} icon={Share2} label={account.platform==='INSTAGRAM'?'Choose Instagram account':'Choose Facebook Page'}><div className="cw-social-row"><span className="cw-social-status">{account.account_name}<small>Choose this account for this business</small></span><button className="cw-primary" type="button" disabled={Boolean(socialBusy)} onClick={()=>void selectSocialAccount(account.id)}>{socialBusy===account.id?'Saving…':'Use this account'}</button></div></SettingsRow>)}{socialError&&<p className="cw-account-feedback error" role="alert">{socialError}</p>}</SettingsGroup>}
       <SettingsGroup title="Notifications">
         {(isBusinessAdmin||isReceptionist)&&<PreferenceToggle label="Payment alerts" detail="Unpaid orders, receipts and payment updates." checked={appPreferences.paymentAlerts} onChange={(value)=>onPreferenceChange({paymentAlerts:value})}/>}
         {isBusinessAdmin&&<PreferenceToggle label="Overdue alerts" detail="Subscription and workspace access reminders." checked={appPreferences.overdueAlerts} onChange={(value)=>onPreferenceChange({overdueAlerts:value})}/>}
