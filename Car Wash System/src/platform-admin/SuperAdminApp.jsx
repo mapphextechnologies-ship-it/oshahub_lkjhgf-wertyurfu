@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Camera, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, Moon, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sun, Trash2, X } from 'lucide-react';
+import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Camera, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, Download, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, Moon, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sun, Trash2, X } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
 import SearchableTables from '../components/SearchableTables.jsx';
 
@@ -35,16 +35,32 @@ export default function SuperAdminApp() {
   const [compactView,setCompactView]=useState(false);
   const [profilePhoto,setProfilePhoto]=useState('');
   const [photoBusy,setPhotoBusy]=useState(false);
+  const [sessionTimeout,setSessionTimeout]=useState(30);
+  const [platformAlerts,setPlatformAlerts]=useState(true);
+  const [accountEmail,setAccountEmail]=useState('');
+  const [newPassword,setNewPassword]=useState('');
+  const [confirmPassword,setConfirmPassword]=useState('');
+  const [accountMessage,setAccountMessage]=useState('');
+  const [installPrompt,setInstallPrompt]=useState(null);
 
   useEffect(() => { setAdminName(session?.membership.full_name || ''); }, [session?.membership.full_name]);
   useEffect(()=>{
     if(!session?.user)return;
     setProfilePhoto(session.user.user_metadata?.oshaHubAvatar||'');
-    try{setCompactView(Boolean(JSON.parse(window.localStorage.getItem(`osha-cw-preferences:${session.user.id}`)||'{}').compactView));}catch{setCompactView(false);}
+    setAccountEmail(session.user.email||'');
+    try{const prefs=JSON.parse(window.localStorage.getItem(`osha-cw-preferences:${session.user.id}`)||'{}');setCompactView(Boolean(prefs.compactView));setSessionTimeout([15,30,60].includes(Number(prefs.sessionTimeout))?Number(prefs.sessionTimeout):30);setPlatformAlerts(prefs.paymentAlerts!==false);}catch{setCompactView(false);setSessionTimeout(30);setPlatformAlerts(true);}
     const savedTheme=session.user.user_metadata?.oshaHubTheme;
     if(['light','dark'].includes(savedTheme))setTheme(savedTheme);
   },[session?.user?.id]);
   useEffect(()=>{window.localStorage.setItem('osha-cw-theme',theme);},[theme]);
+  useEffect(()=>{const capture=(event)=>{event.preventDefault();setInstallPrompt(event);};window.addEventListener('beforeinstallprompt',capture);return()=>window.removeEventListener('beforeinstallprompt',capture);},[]);
+  useEffect(()=>{
+    if(!session)return undefined;
+    let timer;
+    const reset=()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>{void signOut();},sessionTimeout*60*1000);};
+    const events=['pointerdown','keydown','touchstart','mousemove'];events.forEach((name)=>window.addEventListener(name,reset,{passive:true}));reset();
+    return()=>{window.clearTimeout(timer);events.forEach((name)=>window.removeEventListener(name,reset));};
+  },[session?.user?.id,sessionTimeout]);
 
   useEffect(() => {
     if (!supabaseBrowser) { setAuthLoading(false); return undefined; }
@@ -242,6 +258,37 @@ export default function SuperAdminApp() {
     } catch { setError('Could not save the app layout on this device.'); }
   }
 
+  function savePlatformAlerts(nextValue) {
+    setPlatformAlerts(nextValue);
+    try{const key=`osha-cw-preferences:${session.user.id}`;const current=JSON.parse(window.localStorage.getItem(key)||'{}');window.localStorage.setItem(key,JSON.stringify({...current,paymentAlerts:nextValue}));}
+    catch{setError('Could not save the notification preference on this device.');}
+  }
+
+  function saveSessionTimeout(nextValue) {
+    setSessionTimeout(nextValue);
+    try{const key=`osha-cw-preferences:${session.user.id}`;const current=JSON.parse(window.localStorage.getItem(key)||'{}');window.localStorage.setItem(key,JSON.stringify({...current,sessionTimeout:nextValue}));}
+    catch{setError('Could not save the session timeout on this device.');}
+  }
+
+  async function installPlatformApp() {
+    if(!installPrompt){setNotice('In your browser menu, choose Install app or Add to Home Screen.');return;}
+    try{await installPrompt.prompt();const result=await installPrompt.userChoice;setNotice(result?.outcome==='accepted'?'OshaHub was installed on this device.':'You can install OshaHub any time from the browser menu.');}
+    catch{setError('The browser could not start the install prompt.');}
+    finally{setInstallPrompt(null);}
+  }
+
+  async function updateAccount(event) {
+    event.preventDefault();setError('');setNotice('');setAccountMessage('');
+    const emailChanged=accountEmail.trim().toLowerCase()!==(session.user.email||'').toLowerCase();
+    if(!emailChanged&&!newPassword){setError('Enter a new email address or password first.');return;}
+    if(newPassword&&newPassword.length<8){setError('Use a password with at least 8 characters.');return;}
+    if(newPassword!==confirmPassword){setError('The new passwords do not match.');return;}
+    setBusy(true);
+    try{const updates={};if(emailChanged)updates.email=accountEmail.trim();if(newPassword)updates.password=newPassword;const {data,error:accountError}=await supabaseBrowser.auth.updateUser(updates);if(accountError)throw accountError;if(data?.user)setSession((old)=>old?{...old,user:data.user}:old);setNewPassword('');setConfirmPassword('');setAccountMessage(emailChanged?'Check your new email address for a confirmation link.':'Your password has been changed.');}
+    catch(accountError){setError(userFacingErrorMessage(accountError,'Could not update your account. Try again.'));}
+    finally{setBusy(false);}
+  }
+
   async function saveAdminPhoto(file) {
     if(!file)return;
     if(!file.type.startsWith('image/')||file.size>8*1024*1024){setError('Choose an image file smaller than 8 MB.');return;}
@@ -363,7 +410,7 @@ export default function SuperAdminApp() {
   const paidBillingRows=billingRows.filter((row)=>row.isPaid);
   const collected=data.subscriptionPayments.reduce((sum,row)=>sum+Number(row.amount_kes||0),0);
   const pendingBillingRequests=data.billingRequests.filter((request)=>request.status==='PENDING');
-  const platformNotices=[...pending.map((request)=>({id:`request-${request.id}`,title:'Business request awaiting review',detail:`${request.tenant_name} · ${request.owner_name}`,section:'requests'})),...pendingBillingRequests.map((request)=>({id:`billing-${request.id}`,title:request.request_type==='TRIAL_EXTENSION'?'Free trial extension requested':'Plan payment needs verification',detail:`${data.tenants.find((tenant)=>tenant.id===request.tenant_id)?.name||'Business'} · ${request.payment_reference||'7-day extension'}`,section:'plans'})),...unpaidBillingRows.map((row)=>({id:`unpaid-${row.tenant.id}`,title:'Plan payment not recorded',detail:`${row.tenant.name} · ${row.subscription?date(row.subscription.ends_at):'No subscription'}`,section:'plans'})),...paidBillingRows.map((row)=>({id:`paid-${row.payment.id}`,title:'Plan payment confirmed',detail:`${row.tenant.name} · ${row.plan?.name||'Plan'} · KES ${money(row.payment.amount_kes)}`,section:'plans'}))];
+  const platformNotices=platformAlerts?[...pending.map((request)=>({id:`request-${request.id}`,title:'Business request awaiting review',detail:`${request.tenant_name} · ${request.owner_name}`,section:'requests'})),...pendingBillingRequests.map((request)=>({id:`billing-${request.id}`,title:request.request_type==='TRIAL_EXTENSION'?'Free trial extension requested':'Plan payment needs verification',detail:`${data.tenants.find((tenant)=>tenant.id===request.tenant_id)?.name||'Business'} · ${request.payment_reference||'7-day extension'}`,section:'plans'})),...unpaidBillingRows.map((row)=>({id:`unpaid-${row.tenant.id}`,title:'Plan payment not recorded',detail:`${row.tenant.name} · ${row.subscription?date(row.subscription.ends_at):'No subscription'}`,section:'plans'})),...paidBillingRows.map((row)=>({id:`paid-${row.payment.id}`,title:'Plan payment confirmed',detail:`${row.tenant.name} · ${row.plan?.name||'Plan'} · KES ${money(row.payment.amount_kes)}`,section:'plans'}))]:[];
 
   return <div className={`pa-shell ${sidebarCollapsed?'is-collapsed':''} ${menuOpen?'menu-open':''} ${theme==='dark'?'theme-dark':''} ${compactView?'compact-view':''}`} onPointerDownCapture={handleOutsidePointerDown}>
     <SearchableTables />
@@ -378,7 +425,7 @@ export default function SuperAdminApp() {
     </aside>
     {menuOpen&&<button className="pa-scrim" onClick={()=>setMenuOpen(false)} aria-label="Close navigation"/>}
     <main className="pa-main">
-      <header className="pa-topbar">{!menuOpen&&<button className="pa-mobile-open" onClick={()=>setMenuOpen(true)} aria-label="Open navigation menu"><MoreHorizontal size={21}/></button>}<div className="pa-crumb"><span>OSHAHUB / PLATFORM</span><ChevronRight size={14}/><b>{sectionLabel(section)}</b></div><div className="pa-top-actions"><div className="pa-notification-wrap"><button className="pa-bell" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications"><Bell size={18}/>{platformNotices.length>0&&<i>{platformNotices.length>99?'99+':platformNotices.length}</i>}</button>{notificationsOpen&&<div className="pa-notification-panel"><b>Platform notifications</b>{platformNotices.slice(0,30).map((item)=><button key={item.id} onClick={()=>{setSection(item.section);setNotificationsOpen(false);}}><strong>{item.title}</strong><span>{item.detail}</span></button>)}{!platformNotices.length&&<p>All businesses are paid and requests are up to date.</p>}</div>}</div><div className="pa-user"><span className="pa-avatar">{initials(session.membership.full_name)}</span><span><b>{session.membership.full_name}</b><small>SUPER ADMIN</small></span></div></div></header>
+      <header className="pa-topbar">{!menuOpen&&<button className="pa-mobile-open" onClick={()=>setMenuOpen(true)} aria-label="Open navigation menu"><MoreHorizontal size={21}/></button>}<div className="pa-crumb"><span>OSHAHUB / PLATFORM</span><ChevronRight size={14}/><b>{sectionLabel(section)}</b></div><div className="pa-top-actions"><div className="pa-notification-wrap"><button className="pa-bell" onClick={()=>setNotificationsOpen((open)=>!open)} aria-label="Notifications"><Bell size={18}/>{platformNotices.length>0&&<i>{platformNotices.length>99?'99+':platformNotices.length}</i>}</button>{notificationsOpen&&<div className="pa-notification-panel"><b>Platform notifications</b>{platformNotices.slice(0,30).map((item)=><button key={item.id} onClick={()=>{setSection(item.section);setNotificationsOpen(false);}}><strong>{item.title}</strong><span>{item.detail}</span></button>)}{!platformNotices.length&&<p>{platformAlerts?'All businesses are paid and requests are up to date.':'Platform alerts are turned off in Settings.'}</p>}</div>}</div><div className="pa-user"><span className="pa-avatar">{initials(session.membership.full_name)}</span><span><b>{session.membership.full_name}</b><small>SUPER ADMIN</small></span></div></div></header>
       <section className="pa-content">
         {notice && <div className="pa-alert success"><Check size={17}/>{notice}<button onClick={() => setNotice('')} aria-label="Dismiss"><X size={16}/></button></div>}
         {error && <div className="pa-alert error"><CircleAlert size={17}/>{error}<button onClick={() => setError('')} aria-label="Dismiss"><X size={16}/></button></div>}
@@ -400,6 +447,10 @@ export default function SuperAdminApp() {
           <div className="pa-settings-grid">
             <section className="pa-panel pa-settings-panel pa-admin-profile"><div className="pa-admin-profile-head"><div className="pa-admin-avatar">{profilePhoto?<img src={profilePhoto} alt="Profile"/>:initials(adminName)}</div><strong>{adminName||session.user.email}</strong><div className="pa-admin-photo-actions"><label className="pa-activate"><Camera size={15}/>{photoBusy?'Saving…':'Add profile picture'}<input type="file" accept="image/*" disabled={photoBusy} onChange={(event)=>saveAdminPhoto(event.target.files?.[0])}/></label>{profilePhoto&&<button type="button" className="pa-activate danger" disabled={photoBusy} onClick={deleteAdminPhoto}><Trash2 size={15}/>Delete picture</button>}</div></div><div className="pa-panel-head"><div><h2>Administrator profile</h2><p>This display name appears in the platform console and audit activity.</p></div></div><form onSubmit={saveAdminName}><label>Display name<input required minLength="2" maxLength="120" value={adminName} onChange={(event) => setAdminName(event.target.value)}/></label><label>Sign-in email<input value={session.user.email || ''} readOnly/></label><button className="pa-primary" disabled={busy}>Save profile</button></form></section>
             <section className="pa-panel pa-settings-panel pa-admin-appearance"><h2>Appearance</h2><div className="pa-admin-setting-row"><b>Theme</b><div className="pa-admin-choice"><button className={theme==='light'?'selected':''} onClick={()=>saveAdminTheme('light')}><Sun size={15}/>Light</button><button className={theme==='dark'?'selected':''} onClick={()=>saveAdminTheme('dark')}><Moon size={15}/>Dark</button></div></div><div className="pa-admin-setting-row"><b>App layout</b><div className="pa-admin-choice"><button className={!compactView?'selected':''} onClick={()=>saveCompactView(false)}>App view</button><button className={compactView?'selected':''} onClick={()=>saveCompactView(true)}>Compact</button></div></div></section>
+            <section className="pa-panel pa-settings-panel pa-admin-appearance"><h2>Notifications</h2><div className="pa-admin-setting-row"><span><b>Platform alerts</b><small>Business requests, payment reviews and access updates.</small></span><label className="pa-admin-switch"><input type="checkbox" checked={platformAlerts} onChange={(event)=>savePlatformAlerts(event.target.checked)}/><span>{platformAlerts?'On':'Off'}</span></label></div></section>
+            <section className="pa-panel pa-settings-panel pa-admin-appearance"><h2>Security</h2><div className="pa-admin-setting-row"><span><b>App access</b><small>Platform-wide administrative access.</small></span><strong>Super Admin</strong></div><div className="pa-admin-setting-row"><span><b>OTP sign-in</b><small>Managed by account authentication settings.</small></span><strong>Managed</strong></div><div className="pa-admin-setting-row"><span><b>Session timeout</b><small>Sign out after inactivity.</small></span><select value={sessionTimeout} onChange={(event)=>saveSessionTimeout(Number(event.target.value))}><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></div><div className="pa-admin-setting-row"><span><b>Device lock</b><small>Use your device screen lock to protect this app.</small></span><strong>Device setting</strong></div></section>
+            <section className="pa-panel pa-settings-panel pa-admin-appearance"><h2>Account</h2><form onSubmit={updateAccount} className="pa-admin-account-form"><label>Sign-in email<input type="email" autoComplete="email" required value={accountEmail} onChange={(event)=>setAccountEmail(event.target.value)}/><small>Email changes require confirmation.</small></label><label>New password<input type="password" autoComplete="new-password" minLength="8" value={newPassword} onChange={(event)=>setNewPassword(event.target.value)} placeholder="Leave blank to keep current password"/></label><label>Confirm password<input type="password" autoComplete="new-password" minLength="8" value={confirmPassword} onChange={(event)=>setConfirmPassword(event.target.value)} placeholder="Enter the new password again"/></label>{accountMessage&&<p className="pa-settings-message">{accountMessage}</p>}<button className="pa-primary" disabled={busy}>{busy?'Updating…':'Change password'}</button></form></section>
+            <section className="pa-panel pa-settings-panel pa-admin-appearance"><h2>Help</h2><div className="pa-admin-setting-row"><span><b>Contact support</b><small>Help with your OshaHub platform account.</small></span><a href="/#faq" target="_blank" rel="noreferrer">Help center <ChevronRight size={16}/></a></div><div className="pa-admin-setting-row"><span><b>Install app</b><small>Add the platform console to this device.</small></span><button type="button" onClick={installPlatformApp}>Install app <ChevronRight size={16}/></button></div></section>
             <section className="pa-panel pa-settings-security"><ShieldCheck size={23}/><h2>Access and security</h2><p>Platform controls are limited to an active Super Admin membership.</p><div><span>Account role</span><b>Super Admin</b></div><div><span>Membership</span><b>{session.membership.status}</b></div><div><span>Business workspace access</span><b>Platform-wide</b></div><div><span>Sign-in account</span><b>{session.user.email || 'Email unavailable'}</b></div></section>
           </div>
         </>}
