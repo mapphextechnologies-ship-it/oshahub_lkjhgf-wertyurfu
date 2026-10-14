@@ -7,6 +7,7 @@ import {
   Settings, ShieldCheck, Share2, Sparkles, Store, Sun, Moon, UserRound, Users, Wallet, Waves, X, Zap, Eye, EyeOff, Trash2, Pencil
 } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
+import SearchableTables from '../components/SearchableTables.jsx';
 import { dbMethod, loadLiveBillingStatus, loadLiveStaff, loadLiveWorkspace } from './liveWorkspace.js';
 import { getTrialRequestState } from './trialRequestState.js';
 import {
@@ -557,6 +558,7 @@ export default function CarWashApp() {
   if(user.authUserId&&!user.tenant_id)return <div className="cw-authenticated-gate"><div className="cw-gate-card"><img src="/osha-hub-logo-light.svg" alt="OshaHub"/><span className="cw-login-kicker">WORKSPACE ACCESS</span><h1>No business workspace assigned</h1><p>Ask the platform administrator to check your active membership.</p><button className="cw-primary" onClick={logout}>Sign out</button></div></div>;
 
   return <div className={`cw-shell ${theme==='dark'?'theme-dark':''} ${role==='Washer'?'role-washer':''}`} onPointerDownCapture={closeMenuFromOutside}>
+    <SearchableTables />
     <aside ref={sidebarRef} className={`cw-sidebar ${menuOpen?'is-open':''} ${sidebarCollapsed?'is-collapsed':''}`}>
       <div className="cw-brand"><img src="/osha-hub-logo.svg" alt="OshaHub"/><button className="cw-icon-button cw-sidebar-brand-toggle" onClick={()=>{if(window.matchMedia('(max-width: 980px)').matches)setMenuOpen(false);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={menuOpen?'Close side menu':sidebarCollapsed?'Expand side menu':'Collapse side menu'}>{menuOpen?<X size={19}/>:<Menu size={19}/>}</button></div>
       <div className="cw-workspace"><div className="cw-workspace-mark"><Store size={16}/></div><div className="cw-workspace-copy"><b>{role==='SaaS Super Admin'?'Platform owner':tenant?.name||db.settings.businessName}</b><span>{ROLE_COPY[role]}</span></div><ChevronDown size={15}/></div>

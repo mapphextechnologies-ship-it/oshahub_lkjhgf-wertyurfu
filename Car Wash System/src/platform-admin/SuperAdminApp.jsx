@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, ArrowDownToLine, Banknote, Bell, Building2, Check, BadgeCheck, ChevronRight, CircleAlert, Clock3, CreditCard, LayoutDashboard, LoaderCircle, LogOut, Menu, MoreHorizontal, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Trash2, X } from 'lucide-react';
 import { supabaseBrowser, supabaseConfigMessage, supabaseErrorMessage, userFacingErrorMessage } from '../services/supabaseBrowser.js';
+import SearchableTables from '../components/SearchableTables.jsx';
 
 const EMPTY_DATA = { tenants: [], requests: [], plans: [], subscriptions: [], subscriptionPayments: [], billingRequests: [], deletedRecords: [], billingSchemaReady: true };
 
@@ -313,6 +314,7 @@ export default function SuperAdminApp() {
   const platformNotices=[...pending.map((request)=>({id:`request-${request.id}`,title:'Business request awaiting review',detail:`${request.tenant_name} · ${request.owner_name}`,section:'requests'})),...pendingBillingRequests.map((request)=>({id:`billing-${request.id}`,title:request.request_type==='TRIAL_EXTENSION'?'Free trial extension requested':'Plan payment needs verification',detail:`${data.tenants.find((tenant)=>tenant.id===request.tenant_id)?.name||'Business'} · ${request.payment_reference||'7-day extension'}`,section:'plans'})),...unpaidBillingRows.map((row)=>({id:`unpaid-${row.tenant.id}`,title:'Plan payment not recorded',detail:`${row.tenant.name} · ${row.subscription?date(row.subscription.ends_at):'No subscription'}`,section:'plans'})),...paidBillingRows.map((row)=>({id:`paid-${row.payment.id}`,title:'Plan payment confirmed',detail:`${row.tenant.name} · ${row.plan?.name||'Plan'} · KES ${money(row.payment.amount_kes)}`,section:'plans'}))];
 
   return <div className={`pa-shell ${sidebarCollapsed?'is-collapsed':''} ${menuOpen?'menu-open':''}`} onPointerDownCapture={handleOutsidePointerDown}>
+    <SearchableTables />
     <aside className="pa-sidebar">
       <div className="pa-sidebar-head"><a className="pa-brand" href="/"><img src="/osha-hub-logo.svg" alt="OshaHub"/><span>PLATFORM CONTROL</span></a><button className="pa-sidebar-toggle" onClick={()=>{if(window.matchMedia('(max-width: 680px)').matches)setMenuOpen(false);else setSidebarCollapsed((collapsed)=>!collapsed);}} aria-label={menuOpen?'Close side menu':sidebarCollapsed?'Expand side menu':'Collapse side menu'} aria-expanded={window.matchMedia('(max-width: 680px)').matches?menuOpen:!sidebarCollapsed}>{menuOpen?<X size={19}/>:<Menu size={19}/>}</button></div>
       <div className="pa-nav-label">ADMINISTRATION</div>

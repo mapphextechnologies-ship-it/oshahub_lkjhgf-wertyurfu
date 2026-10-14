@@ -34,6 +34,8 @@ vercel-dev*.log
 /src/assets/
 /src/components/*
 !/src/components/ErrorBoundary.jsx
+!/src/components/SearchableTables.jsx
+!/src/components/searchable-table.css
 /src/services/*
 !/src/services/supabaseBrowser.js
 /local-dev-server.js
