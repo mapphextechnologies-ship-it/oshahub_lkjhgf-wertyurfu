@@ -6,3 +6,5 @@
 !**/.env.*.example
 !**/.env.*.template
 Car Wash System/supabase/.temp/
+
+.vercel/
